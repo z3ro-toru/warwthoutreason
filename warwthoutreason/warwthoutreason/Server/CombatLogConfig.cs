@@ -1,6 +1,6 @@
 using Newtonsoft.Json;
 
-namespace CombatLogMod
+namespace warwthtreason.Server
 {
     // Класс конфигурации. Поля публичные, чтобы Newtonsoft.Json мог их сериализовать.
     public class CombatLogConfig

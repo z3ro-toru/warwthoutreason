@@ -7,67 +7,49 @@ using Vintagestory.API.Config;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
 using Vintagestory.GameContent;
+using warwthtreason.Common; // Доступ к CombatTimerPacket
 
-namespace CombatLogMod
+namespace warwthtreason.Server
 {
-    // Отдельный статический класс-аксессор. Патч SafeZone будет обращаться сюда,
-    // чтобы получить доступ к текущему экземпляру системы CombatLogSystem.
-    // Статическое поле нужно потому, что Harmony-патчи статические и не могут 
-    // напрямую ссылаться на экземпляры объектов.
-    
+    // Статический аксессор — Harmony-патчи (в другом файле) достают через него наш экземпляр системы.
     public static class CombatLogSystemAccessor
     {
-        // Ссылка на активный экземпляр системы. Устанавливается в StartServerSide.
         public static CombatLogSystem? Instance { get; set; }
     }
 
     public class CombatLogSystem : ModSystem
     {
-        // Ссылка на API сервера.
         private ICoreServerAPI sapi = null!;
-
-        // Загруженная конфигурация.
         private CombatLogConfig config = null!;
-
-        // Словарь с временем окончания боя для каждого игрока.
         private Dictionary<string, long> combatTimers = new Dictionary<string, long>();
-
-        // ID слушателя тиков.
         private long tickListenerId;
-
-        // Ссылка на объект Harmony для управления патчами.
         private Harmony? harmony;
+        private IServerNetworkChannel? serverChannel;
 
         public override void StartServerSide(ICoreServerAPI api)
         {
             sapi = api;
 
-            // Загрузка/создание конфига.
-            config = sapi.LoadModConfig<CombatLogConfig>("CombatLogMod.json");
+            // Загружаем конфиг под новым именем файла.
+            config = sapi.LoadModConfig<CombatLogConfig>("WarWithoutReason.json");
             if (config == null)
             {
                 config = new CombatLogConfig();
-                sapi.StoreModConfig(config, "CombatLogMod.json");
+                sapi.StoreModConfig(config, "WarWithoutReason.json");
             }
 
-            // Подписки на события игроков.
             sapi.Event.PlayerJoin += OnPlayerJoin;
             sapi.Event.PlayerLeave += OnPlayerLeave;
-
-            // Тик раз в секунду для проверки истечения таймеров.
             tickListenerId = sapi.Event.RegisterGameTickListener(OnGameTick, 1000);
 
-            // --- ИНТЕГРАЦИЯ С SAFEZONE ---
-            // Создаём экземпляр Harmony с уникальным идентификатором.
-            // Этот ID используется для снятия именно наших патчей при выгрузке мода.
-            harmony = new Harmony("com.combatlogmod.patch");
+            // Регистрируем сетевой канал. Имя "warwthtreason" — должно совпадать с клиентом.
+            serverChannel = sapi.Network.RegisterChannel("warwthtreason")
+                .RegisterMessageType<CombatTimerPacket>();
 
-            // Применяем все патчи, помеченные атрибутом [HarmonyPatch] в этой сборке.
-            // Это активирует SafeZoneCombatPatch (см. отдельный файл).
+            // Harmony с новым уникальным ID.
+            harmony = new Harmony("com.warwthtreason.patch");
             harmony.PatchAll();
 
-            // Сохраняем ссылку на этот экземпляр системы,
-            // чтобы Harmony-патч мог вызывать IsInCombat().
             CombatLogSystemAccessor.Instance = this;
         }
 
@@ -76,9 +58,6 @@ namespace CombatLogMod
             var healthBehavior = player.Entity.GetBehavior<EntityBehaviorHealth>();
             if (healthBehavior != null)
             {
-                // ВАЖНО: Мы используем лямбда-выражение, чтобы "прокинуть" внутрь
-                // игрока-жертву (player). Событие onDamaged само по себе
-                // не передаёт жертву, только урон и DamageSource.
                 healthBehavior.onDamaged += (damage, damageSource) => OnPlayerDamaged(player, damage, damageSource);
             }
         }
@@ -88,31 +67,24 @@ namespace CombatLogMod
             combatTimers.Remove(player.PlayerUID);
         }
 
-        // Обработчик получения урона. Теперь принимает игрока-жертву как параметр.
         private float OnPlayerDamaged(IServerPlayer victim, float damage, DamageSource damageSource)
         {
-            // Нас интересует только PvP-урон.
             if (damageSource.Source != EnumDamageSource.Player) return damage;
 
-            // Получаем атакующего из DamageSource.
             var attackerEntity = damageSource.GetCauseEntity() as EntityPlayer;
             if (attackerEntity?.Player is not IServerPlayer attacker) return damage;
 
-            // Игнорируем урон самому себе.
             if (attacker == victim) return damage;
 
-            // Активируем/продлеваем режим боя для обоих.
             SetCombatMode(victim);
             SetCombatMode(attacker);
 
-            // Возвращаем урон без изменений.
             return damage;
         }
 
         private bool SetCombatMode(IServerPlayer player)
         {
             bool wasAlreadyInCombat = combatTimers.ContainsKey(player.PlayerUID);
-
             long endTime = sapi.World.ElapsedMilliseconds + (config.CombatDurationSeconds * 1000);
             combatTimers[player.PlayerUID] = endTime;
 
@@ -157,16 +129,32 @@ namespace CombatLogMod
 
             foreach (var kvp in combatTimers)
             {
-                if (currentTime >= kvp.Value)
+                string playerUid = kvp.Key;
+                long endTime = kvp.Value;
+
+                var player = sapi.World.PlayerByUid(playerUid) as IServerPlayer;
+                if (player == null)
                 {
-                    expiredPlayers.Add(kvp.Key);
+                    expiredPlayers.Add(playerUid);
+                    continue;
                 }
+
+                long remainingMs = endTime - currentTime;
+
+                if (remainingMs <= 0)
+                {
+                    serverChannel?.SendPacket(new CombatTimerPacket { RemainingSeconds = 0 }, player);
+                    expiredPlayers.Add(playerUid);
+                    continue;
+                }
+
+                int seconds = (int)Math.Ceiling(remainingMs / 1000.0);
+                serverChannel?.SendPacket(new CombatTimerPacket { RemainingSeconds = seconds }, player);
             }
 
             foreach (string uid in expiredPlayers)
             {
                 combatTimers.Remove(uid);
-
                 var player = sapi.World.PlayerByUid(uid) as IServerPlayer;
                 if (player != null)
                 {
@@ -175,7 +163,6 @@ namespace CombatLogMod
             }
         }
 
-        // Публичный метод, который вызывает Harmony-патч SafeZone.
         public bool IsInCombat(IServerPlayer player)
         {
             return combatTimers.ContainsKey(player.PlayerUID);
@@ -190,11 +177,7 @@ namespace CombatLogMod
                 sapi.Event.UnregisterGameTickListener(tickListenerId);
             }
 
-            // Снимаем все Harmony-патчи, установленные нашим модом.
-            // Это важно, чтобы при перезагрузке мода не остались "висячие" патчи.
-            harmony?.UnpatchAll("com.combatlogmod.patch");
-
-            // Обнуляем ссылку, чтобы патч не обращался к мёртвому объекту.
+            harmony?.UnpatchAll("com.warwthtreason.patch");
             CombatLogSystemAccessor.Instance = null;
         }
     }

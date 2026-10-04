@@ -1,15 +1,15 @@
 {
-    "$schema": "https://moddbcdn.vintagestory.at/schema/modinfo.latest.json",
-    "type": "Code",
-    "modid": "warwthoutreason",
-    "name": "War Without Reason",
-    "authors": [
-        "Nomadu_Z3r0"
-    ],
-  "description": "cooldown. Compatible with SafeZone.",
-    "side": "Universal",
-    "version": "1.1.0",
-    "dependencies": {
-        "game": "1.21.0"
-    }
+  "$schema": "https://moddbcdn.vintagestory.at/schema/modinfo.latest.json",
+  "type": "Code",
+  "modid": "warwthtreason",
+  "name": "War Without Reason",
+  "authors": [
+    "Nomadu_Z3r0"
+  ],
+  "description": "Система режима боя (Combat Log) с таймером на экране и интеграцией с SafeZone.",
+  "side": "Universal",
+  "version": "1.1.0",
+  "dependencies": {
+    "game": "1.21.0"
+  }
 }
