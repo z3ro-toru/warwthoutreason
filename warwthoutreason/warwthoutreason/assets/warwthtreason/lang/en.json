@@ -1,0 +1,8 @@
+{
+  "combat-enter": "[Combat] You entered combat! Safe zones no longer protect you.",
+  "combat-exit": "[Combat] You left combat. Safe zones are active again.",
+  "combat-screen-enter": "COMBAT MODE ACTIVATED",
+  "combat-screen-exit": "COMBAT MODE ENDED",
+  "combat-timer": "In combat: {0} s. left",
+  "combat-log-kill": "Player {0} logged out during combat and was killed by Karma."
+}

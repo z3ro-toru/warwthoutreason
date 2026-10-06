@@ -1,4 +1,5 @@
 ﻿using Vintagestory.API.Client;
+using Vintagestory.API.Config;
 
 namespace warwthtreason.Client
 {
@@ -8,6 +9,7 @@ namespace warwthtreason.Client
 
         public CombatTimerHud(ICoreClientAPI capi) : base(capi)
         {
+            // Композер — контейнер для элементов HUD. Привязка: верхний центр экрана.
             var composer = capi.Gui.CreateCompo("combattimerhud",
                 ElementBounds.Fixed(EnumDialogArea.CenterTop, 0, 80, 400, 50));
 
@@ -21,6 +23,7 @@ namespace warwthtreason.Client
             timerText = SingleComposer.GetDynamicText("combattimer");
         }
 
+        // Обновляет текст HUD. Пустая строка = элемент не отображается визуально.
         public void SetTime(int seconds)
         {
             if (timerText == null) return;
@@ -31,7 +34,7 @@ namespace warwthtreason.Client
             }
             else
             {
-                timerText.SetNewText($"В бою: {seconds} сек.");
+                timerText.SetNewText(Lang.Get("warwthtreason:combat-timer", seconds));
             }
         }
     }

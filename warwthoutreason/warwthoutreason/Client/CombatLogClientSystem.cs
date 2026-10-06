@@ -1,6 +1,6 @@
 ﻿using Vintagestory.API.Client;
 using Vintagestory.API.Common;
-using warwthtreason.Common; // Доступ к CombatTimerPacket
+using warwthtreason.Common;
 
 namespace warwthtreason.Client
 {
@@ -13,7 +13,7 @@ namespace warwthtreason.Client
         {
             capi = api;
 
-            // Имя канала ДОЛЖНО совпадать с сервером ("warwthtreason").
+            // Канал должен совпадать с серверным ("warwthtreason").
             api.Network.RegisterChannel("warwthtreason")
                 .RegisterMessageType<CombatTimerPacket>()
                 .SetMessageHandler<CombatTimerPacket>(OnTimerPacket);

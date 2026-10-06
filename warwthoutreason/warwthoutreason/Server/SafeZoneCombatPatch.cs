@@ -4,13 +4,16 @@ using HarmonyLib;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Server;
-using warwthtreason.Server; // Доступ к CombatLogSystemAccessor
 
 namespace warwthtreason.Server
 {
+    // Патч на метод Prefix патча SafeZone. Возвращая false из нашего Prefix,
+    // мы не даём SafeZone'вскому Prefix выполниться — и SafeZone не блокирует урон.
     [HarmonyPatch]
     public static class SafeZoneCombatOverridePatch
     {
+        // TargetMethod ищет SafeZone.Patch_Entity_ReceiveDamage.Prefix в загруженных сборках.
+        // Если SafeZone не установлен, возвращаем null — Harmony пропустит патч.
         static MethodBase? TargetMethod()
         {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
@@ -24,6 +27,8 @@ namespace warwthtreason.Server
             return null;
         }
 
+        // __0 — первый аргумент целевого метода (Entity, получатель урона).
+        // __1 — второй аргумент (DamageSource).
         static bool Prefix(Entity __0, DamageSource __1)
         {
             var system = CombatLogSystemAccessor.Instance;
@@ -40,6 +45,7 @@ namespace warwthtreason.Server
 
             if (attacker == victim) return true;
 
+            // Если кто-то в бою — пропускаем проверку SafeZone (возвращаем false).
             if (system.IsInCombat(attacker) || system.IsInCombat(victim))
             {
                 return false;

@@ -1,19 +1,30 @@
-using Newtonsoft.Json;
-
 namespace warwthtreason.Server
 {
-    // Класс конфигурации. Поля публичные, чтобы Newtonsoft.Json мог их сериализовать.
+    // Основной конфиг мода. Сериализуется в ModConfig/WarWithoutReason.json.
     public class CombatLogConfig
     {
-        // Длительность режима боя в секундах. По умолчанию 30.
+        // Длительность режима боя в секундах.
         public int CombatDurationSeconds { get; set; } = 30;
 
-        // Включает/выключает сообщения в текстовом чате игрока.
-        // true — сообщения будут отправляться, false — нет.
+        // Отправлять ли сообщения в чат при входе/выходе из боя.
         public bool SendChatMessages { get; set; } = true;
 
-        // Включает/выключает крупные уведомления по центру экрана/HUD.
-        // true — уведомления будут показываться, false — нет.
+        // Показывать ли крупные уведомления на экране.
         public bool ShowScreenMessages { get; set; } = true;
+
+        // Убивать ли игрока, вышедшего из игры во время боя.
+        public bool KillOnCombatLogout { get; set; } = true;
+
+        // Включает собственную систему защиты приватов.
+        // Автоматически отключается при обнаружении SafeZone.
+        public bool EnableClaimProtection { get; set; } = true;
+
+        // Глобальный запрет PvP в приватах.
+        // Переопределяется per-claim флагом AllowPvP.
+        public bool PreventPvPInClaims { get; set; } = true;
+
+        // Глобальный запрет PvE (урон от мобов) в приватах.
+        // По умолчанию выключен, чтобы мобы атаковали как обычно.
+        public bool PreventPvEInClaims { get; set; } = false;
     }
 }
