@@ -11,8 +11,6 @@ using warwthtreason.Common;
 
 namespace warwthtreason.Server
 {
-    // Статический аксессор — Harmony-патчи из других файлов достают через него
-    // активный экземпляр системы, так как сами патчи статические.
     public static class CombatLogSystemAccessor
     {
         public static CombatLogSystem? Instance { get; set; }
@@ -20,31 +18,35 @@ namespace warwthtreason.Server
 
     public class CombatLogSystem : ModSystem
     {
-        // === Основные ссылки ===
+        // === Core references ===
         private ICoreServerAPI sapi = null!;
         private CombatLogConfig config = null!;
         private ClaimFlagsConfig claimFlagsConfig = null!;
 
-        // === Состояние боя ===
-        // Ключ — PlayerUID, значение — время окончания боя (ElapsedMilliseconds + duration).
-        private Dictionary<string, long> combatTimers = new Dictionary<string, long>();
+        // === Combat state ===
+        // Key: PlayerUID. Value: combat end time (ElapsedMilliseconds + duration).
+        private readonly Dictionary<string, long> combatTimers = [];
 
-        // === Инфраструктура ===
+        // Stores the exact delegate we subscribed to onDamaged, so we can
+        // unsubscribe later. Without this, we would leak subscriptions and
+        // potentially get double-handling on reconnect.
+        private readonly Dictionary<string, OnDamagedDelegate> damageHandlers = [];
+
+        // === Infrastructure ===
         private long tickListenerId;
         private Harmony? harmony;
         private IServerNetworkChannel? serverChannel;
 
-        // === Публичные свойства для патчей и клиента ===
+        // === Public accessors for patches and the client ===
         public CombatLogConfig Config => config;
         public ICoreServerAPI Sapi => sapi;
 
-        // Публичная версия переключения флага, используемая слушателем CommandHook.
-        // Принимает готовое значение (true = разрешено, false = запрещено).
+        // Public flag toggle used by the optional CommandHook listener.
         public TextCommandResult ToggleClaimFlagDirect(IServerPlayer player, bool isPvP, bool value)
         {
             var claims = sapi.World.Claims.Get(player.Entity.Pos.AsBlockPos);
             if (claims == null || claims.Length == 0)
-                return TextCommandResult.Error("Вы не находитесь в привате.");
+                return TextCommandResult.Error(Lang.GetL(player.LanguageCode, "warwthtreason:err-not-in-claim"));
 
             string claimId = GetClaimId(claims[0]);
             if (!claimFlagsConfig.Flags.TryGetValue(claimId, out var flags))
@@ -56,58 +58,59 @@ namespace warwthtreason.Server
             if (isPvP) flags.AllowPvP = value;
             else flags.AllowPvE = value;
 
-            sapi.StoreModConfig(claimFlagsConfig, "ClaimFlags.json");
+            sapi.StoreModConfig(claimFlagsConfig, "WWR_ClaimFlags.json");
 
             string flagName = isPvP ? "PvP" : "PvE";
-            string state = value ? "разрешён" : "запрещён";
-            return TextCommandResult.Success($"Флаг {flagName} для привата '{claimId}' {state}.");
+            string state = value
+                ? Lang.GetL(player.LanguageCode, "warwthtreason:value-allowed")
+                : Lang.GetL(player.LanguageCode, "warwthtreason:value-denied");
+            return TextCommandResult.Success(Lang.GetL(player.LanguageCode, "warwthtreason:flag-set", flagName, claimId, state));
         }
 
         public override void StartServerSide(ICoreServerAPI api)
         {
             sapi = api;
 
-            // --- Загрузка основного конфига ---
+            // --- Load main config ---
             config = sapi.LoadModConfig<CombatLogConfig>("WarWithoutReason.json");
             if (config == null)
             {
                 config = new CombatLogConfig();
-                sapi.Logger.Notification("[WarWithoutReason] Создан новый конфиг с настройками по умолчанию.");
+                sapi.Logger.Notification("[WarWithoutReason] Created a new config with default values.");
             }
             else if (config.CombatDurationSeconds <= 0)
             {
                 config.CombatDurationSeconds = 30;
-                sapi.Logger.Warning("[WarWithoutReason] CombatDurationSeconds <= 0, установлено 30.");
+                sapi.Logger.Warning("[WarWithoutReason] CombatDurationSeconds <= 0, reset to 30.");
             }
             sapi.StoreModConfig(config, "WarWithoutReason.json");
 
-            // --- Загрузка per-claim флагов ---
-            claimFlagsConfig = sapi.LoadModConfig<ClaimFlagsConfig>("ClaimFlags.json");
+            // --- Load per-claim flags ---
+            claimFlagsConfig = sapi.LoadModConfig<ClaimFlagsConfig>("WWR_ClaimFlags.json");
             if (claimFlagsConfig == null)
             {
                 claimFlagsConfig = new ClaimFlagsConfig();
-                sapi.StoreModConfig(claimFlagsConfig, "ClaimFlags.json");
+                sapi.StoreModConfig(claimFlagsConfig, "WWR_ClaimFlags.json");
             }
 
-            // --- Проверка SafeZone ---
-            // Если SafeZone установлен — отключаем нашу защиту, чтобы не было двойной обработки.
+            // --- SafeZone detection ---
             if (sapi.ModLoader.IsModEnabled("safezone"))
             {
-                sapi.Logger.Notification("[WarWithoutReason] Обнаружен SafeZone. Собственная защита приватов отключена.");
+                sapi.Logger.Notification("[WarWithoutReason] SafeZone detected. Built-in claim protection disabled.");
                 config.EnableClaimProtection = false;
                 sapi.StoreModConfig(config, "WarWithoutReason.json");
             }
             else
             {
-                sapi.Logger.Notification("[WarWithoutReason] SafeZone не обнаружен. Активирована собственная защита приватов.");
+                sapi.Logger.Notification("[WarWithoutReason] SafeZone not detected. Built-in claim protection enabled.");
             }
 
-            // --- Подписки на события ---
+            // --- Event subscriptions ---
             sapi.Event.PlayerJoin += OnPlayerJoin;
             sapi.Event.PlayerLeave += OnPlayerLeave;
             tickListenerId = sapi.Event.RegisterGameTickListener(OnGameTick, 1000);
 
-            // --- Сетевой канал для HUD-таймера ---
+            // --- Network channel for the HUD timer ---
             serverChannel = sapi.Network.RegisterChannel("warwthtreason")
                 .RegisterMessageType<CombatTimerPacket>();
 
@@ -116,73 +119,71 @@ namespace warwthtreason.Server
             harmony.PatchAll();
             CombatLogSystemAccessor.Instance = this;
 
-            // --- Команды /claimflag ---
+            // --- /claimflag command ---
             RegisterClaimFlagCommands();
 
-            // --- Интеграция с CommandHook ---
-            //RegisterCommandHookListener();
-
-            sapi.Logger.Notification("[WarWithoutReason] Серверная часть мода успешно загружена.");
+            sapi.Logger.Notification("[WarWithoutReason] Server-side initialization complete.");
         }
 
-        // Регистрирует команды /claimflag pvp|pve|status.
         private void RegisterClaimFlagCommands()
         {
             sapi.ChatCommands.Create("claimflag")
-                .WithDescription("Управление флагами PvP/PvE для вашего привата.")
+                .WithDescription(Lang.Get("warwthtreason:cmd-claimflag-desc"))
                 .BeginSubCommand("pvp")
-                    .WithDescription("Включить/выключить PvP: /claimflag pvp on|off|default")
+                    .WithDescription(Lang.Get("warwthtreason:cmd-claimflag-pvp-desc"))
                     .WithArgs(sapi.ChatCommands.Parsers.Word("value"))
                     .HandleWith(args => ToggleClaimFlag(args, isPvP: true))
                 .EndSubCommand()
                 .BeginSubCommand("pve")
-                    .WithDescription("Включить/выключить урон от мобов: /claimflag pve on|off|default")
+                    .WithDescription(Lang.Get("warwthtreason:cmd-claimflag-pve-desc"))
                     .WithArgs(sapi.ChatCommands.Parsers.Word("value"))
                     .HandleWith(args => ToggleClaimFlag(args, isPvP: false))
                 .EndSubCommand()
                 .BeginSubCommand("status")
-                    .WithDescription("Показать текущие флаги привата.")
+                    .WithDescription(Lang.Get("warwthtreason:cmd-claimflag-status-desc"))
                     .HandleWith(OnShowClaimStatus)
                 .EndSubCommand();
         }
 
-        // Регистрирует слушателя CommandHook, если мод установлен.
-        /*private void RegisterCommandHookListener()
-        {
-            if (!sapi.ModLoader.IsModEnabled("commandhook"))
-            {
-                sapi.Logger.Notification("[WarWithoutReason] CommandHook не найден. Команды /land claim allowpvp/allowpve недоступны.");
-                return;
-            }
-
-            try
-            {
-                // Регистрируем слушателя через CommandHook API.
-                // LandClaimCommandListener — наш класс, реализующий ICommandListener.
-                CommandHook.CommandHookModSystem.Register(new LandClaimCommandListener(this));
-                sapi.Logger.Notification("[WarWithoutReason] Интеграция с CommandHook активна.");
-            }
-            catch (Exception ex)
-            {
-                sapi.Logger.Error("[WarWithoutReason] Ошибка регистрации в CommandHook: " + ex.Message);
-            }
-        }*/
-
-        // === Работа с игроками ===
+        // === Player events ===
 
         private void OnPlayerJoin(IServerPlayer player)
         {
-            var healthBehavior = player.Entity.GetBehavior<EntityBehaviorHealth>();
-            if (healthBehavior != null)
-            {
-                // Передаём игрока-жертву в обработчик через лямбду — событие onDamaged
-                // само по себе жертву не передаёт.
-                healthBehavior.onDamaged += (damage, damageSource) => OnPlayerDamaged(player, damage, damageSource);
-            }
+            // Explicit null-check narrows 'player' to non-null for the rest of the method.
+            // This silences the CS8602 warnings that appear if we use 'player?.Entity' below.
+            if (player == null) return;
+
+            var entity = player.Entity;
+            if (entity == null) return;
+
+            var healthBehavior = entity.GetBehavior<EntityBehaviorHealth>();
+            if (healthBehavior == null) return;
+
+            // Store the delegate so we can unsubscribe on leave.
+            // This prevents duplicate handlers if the player rejoins quickly.
+            OnDamagedDelegate handler = (damage, damageSource) => OnPlayerDamaged(player, damage, damageSource);
+            damageHandlers[player.PlayerUID] = handler;
+            healthBehavior.onDamaged += handler;
         }
 
         private void OnPlayerLeave(IServerPlayer player)
         {
+            if (player == null) return;
+
+            // Unsubscribe from onDamaged before the entity is destroyed.
+            // This ensures we don't leak handlers.
+            var entity = player.Entity;
+            if (entity != null)
+            {
+                var healthBehavior = entity.GetBehavior<EntityBehaviorHealth>();
+                if (healthBehavior != null && damageHandlers.TryGetValue(player.PlayerUID, out var handler))
+                {
+                    healthBehavior.onDamaged -= handler;
+                }
+            }
+            damageHandlers.Remove(player.PlayerUID);
+
+            // Existing combat-logout logic.
             if (combatTimers.ContainsKey(player.PlayerUID))
             {
                 combatTimers.Remove(player.PlayerUID);
@@ -195,12 +196,12 @@ namespace warwthtreason.Server
                 {
                     sapi.Logger.Notification(
                         $"[WarWithoutReason] Player '{player.PlayerName}' ({player.PlayerUID}) " +
-                        $"вышел из игры во время боя. Наказание не применено (KillOnCombatLogout = false).");
+                        $"logged out during combat. Punishment skipped (KillOnCombatLogout = false).");
                 }
             }
         }
 
-        // === Combat Log ===
+        // === Combat log ===
 
         private float OnPlayerDamaged(IServerPlayer victim, float damage, DamageSource damageSource)
         {
@@ -251,12 +252,12 @@ namespace warwthtreason.Server
             }
         }
 
-        // === Тик и таймеры ===
+        // === Tick & timers ===
 
         private void OnGameTick(float dt)
         {
             long currentTime = sapi.World.ElapsedMilliseconds;
-            List<string> expiredPlayers = new List<string>();
+            List<string> expiredPlayers = [];
 
             foreach (var kvp in combatTimers)
             {
@@ -294,15 +295,17 @@ namespace warwthtreason.Server
             }
         }
 
-        // === Наказание за combat logging ===
+        // === Combat logging punishment ===
 
         private void KillCombatLogger(IServerPlayer player)
         {
+            // Explicit null-check narrows 'player' to non-null for the rest of the method.
+            // This silences CS8602 on the player.PlayerName / player.PlayerUID lines below.
+            if (player == null) return;
+
             var entity = player.Entity;
             if (entity == null || !entity.Alive) return;
 
-            // DamageSource типа Suicide — игра корректно обработает смерть
-            // и не припишет убийство атакующему.
             var damageSource = new DamageSource
             {
                 Source = EnumDamageSource.Suicide,
@@ -315,34 +318,33 @@ namespace warwthtreason.Server
 
             sapi.Logger.Notification(
                 $"[WarWithoutReason] Player '{player.PlayerName}' ({player.PlayerUID}) " +
-                $"вышел из игры во время боя и был убит.");
+                $"logged out during combat and was killed.");
 
-            string message = Lang.Get("warwthtreason:combat-log-kill", player.PlayerName);
             foreach (var onlinePlayer in sapi.World.AllOnlinePlayers)
             {
                 if (onlinePlayer is IServerPlayer sp)
                 {
+                    string message = Lang.GetL(sp.LanguageCode, "warwthtreason:combat-log-kill", player.PlayerName ?? "unknown");
                     sp.SendMessage(GlobalConstants.GeneralChatGroup, message, EnumChatType.Notification);
                 }
             }
         }
 
-        // === Публичные методы для патчей и слушателя ===
+        // === Public helpers for patches ===
 
-        // Проверяет, находится ли игрок в режиме боя.
         public bool IsInCombat(IServerPlayer player) => combatTimers.ContainsKey(player.PlayerUID);
 
-        // Возвращает массив приватов в указанной позиции (может быть null или пустым).
         public LandClaim[]? GetClaimsAt(BlockPos pos) => sapi.World.Claims.Get(pos);
 
-        // Генерирует уникальный ID привата из его координат.
-        // В публичном API нет строкового ID, поэтому используем координаты.
+        // Returns a unique string ID for a claim.
+        // Uses center coordinates because LandClaim has no public Index/Id,
+        // and claims cannot overlap, so centers are guaranteed unique.
         public string GetClaimId(LandClaim claim)
         {
-            return claim.ToString()!;
+            var center = claim.Center;
+            return $"{center.X},{center.Y},{center.Z}";
         }
 
-        // Возвращает per-claim флаги или null, если для привата ничего не задано.
         public ClaimFlags? GetClaimFlags(LandClaim claim)
         {
             if (claim == null) return null;
@@ -350,27 +352,26 @@ namespace warwthtreason.Server
             return claimFlagsConfig.Flags.TryGetValue(id, out var flags) ? flags : null;
         }
 
-        // === Обработчики команд /claimflag ===
+        // === /claimflag handlers ===
 
         private TextCommandResult ToggleClaimFlag(TextCommandCallingArgs args, bool isPvP)
         {
             if (args.Caller.Player is not IServerPlayer player)
-                return TextCommandResult.Error("Команда доступна только игрокам.");
+                return TextCommandResult.Error(Lang.Get("warwthtreason:err-players-only"));
 
             var claims = sapi.World.Claims.Get(player.Entity.Pos.AsBlockPos);
             if (claims == null || claims.Length == 0)
-                return TextCommandResult.Error("Вы не находитесь в привате.");
+                return TextCommandResult.Error(Lang.GetL(player.LanguageCode, "warwthtreason:err-not-in-claim"));
 
             var claim = claims[0];
 
-            // TryAccess возвращает true для владельца и игроков с правами на строительство.
             bool hasAccess = sapi.World.Claims.TryAccess(
                 player, player.Entity.Pos.AsBlockPos, EnumBlockAccessFlags.BuildOrBreak);
 
             if (!hasAccess)
-                return TextCommandResult.Error("У вас нет прав на управление этим приватом.");
+                return TextCommandResult.Error(Lang.GetL(player.LanguageCode, "warwthtreason:err-no-permission"));
 
-            string claimId = claim.ToString()!;
+            string claimId = GetClaimId(claim);
             if (!claimFlagsConfig.Flags.TryGetValue(claimId, out var flags))
             {
                 flags = new ClaimFlags();
@@ -385,40 +386,52 @@ namespace warwthtreason.Server
                 case "off": newValue = false; break;
                 case "default": newValue = null; break;
                 default:
-                    return TextCommandResult.Error("Используйте: on, off или default.");
+                    return TextCommandResult.Error(Lang.GetL(player.LanguageCode, "warwthtreason:err-invalid-value"));
             }
 
             if (isPvP) flags.AllowPvP = newValue;
             else flags.AllowPvE = newValue;
 
-            sapi.StoreModConfig(claimFlagsConfig, "ClaimFlags.json");
+            sapi.StoreModConfig(claimFlagsConfig, "WWR_ClaimFlags.json");
 
             string flagName = isPvP ? "PvP" : "PvE";
-            string state = value == "default" ? "сброшен в глобальное значение" : $"установлен в '{value}'";
-            return TextCommandResult.Success($"Флаг {flagName} для привата '{claimId}' {state}.");
+
+            if (value == "default")
+            {
+                return TextCommandResult.Success(
+                    Lang.GetL(player.LanguageCode, "warwthtreason:flag-reset", flagName, claimId));
+            }
+
+            return TextCommandResult.Success(
+                Lang.GetL(player.LanguageCode, "warwthtreason:flag-set", flagName, claimId, value));
         }
 
         private TextCommandResult OnShowClaimStatus(TextCommandCallingArgs args)
         {
             if (args.Caller.Player is not IServerPlayer player)
-                return TextCommandResult.Error("Команда доступна только игрокам.");
+                return TextCommandResult.Error(Lang.Get("warwthtreason:err-players-only"));
 
             var claims = sapi.World.Claims.Get(player.Entity.Pos.AsBlockPos);
             if (claims == null || claims.Length == 0)
-                return TextCommandResult.Error("Вы не находитесь в привате.");
+                return TextCommandResult.Error(Lang.GetL(player.LanguageCode, "warwthtreason:err-not-in-claim"));
 
             string claimId = GetClaimId(claims[0]);
 
             if (!claimFlagsConfig.Flags.TryGetValue(claimId, out var flags))
-                return TextCommandResult.Success($"Приват '{claimId}': флаги не заданы. Используются глобальные настройки.");
+            {
+                return TextCommandResult.Success(
+                    Lang.GetL(player.LanguageCode, "warwthtreason:claim-status-empty", claimId));
+            }
 
-            string pvp = flags.AllowPvP?.ToString() ?? "по умолчанию";
-            string pve = flags.AllowPvE?.ToString() ?? "по умолчанию";
+            string defaultValue = Lang.GetL(player.LanguageCode, "warwthtreason:value-default");
+            string pvp = flags.AllowPvP?.ToString() ?? defaultValue;
+            string pve = flags.AllowPvE?.ToString() ?? defaultValue;
 
-            return TextCommandResult.Success($"Приват '{claimId}': PvP = {pvp}, PvE = {pve}.");
+            return TextCommandResult.Success(
+                Lang.GetL(player.LanguageCode, "warwthtreason:claim-status-full", claimId, pvp, pve));
         }
 
-        // === Выгрузка ===
+        // === Shutdown ===
 
         public override void Dispose()
         {
@@ -432,7 +445,7 @@ namespace warwthtreason.Server
             harmony?.UnpatchAll(Mod.Info.ModID);
             CombatLogSystemAccessor.Instance = null;
 
-            sapi?.Logger.Notification("[WarWithoutReason] Серверная часть мода выгружена.");
+            sapi?.Logger.Notification("[WarWithoutReason] Server-side shutdown complete.");
         }
     }
 }

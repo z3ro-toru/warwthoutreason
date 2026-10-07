@@ -3,6 +3,26 @@
   "combat-exit": "[Combat] You left combat. Safe zones are active again.",
   "combat-screen-enter": "COMBAT MODE ACTIVATED",
   "combat-screen-exit": "COMBAT MODE ENDED",
-  "combat-timer": "In combat: {0} s. left",
-  "combat-log-kill": "Player {0} logged out during combat and was killed by Karma."
+  "combat-timer": "In combat: {0} s.",
+  "combat-log-kill": "Player {0} logged out during combat and was killed by Karma.",
+
+  "cmd-claimflag-desc": "Manage PvP/PvE flags for your claim.",
+  "cmd-claimflag-pvp-desc": "Toggle PvP: /claimflag pvp on|off|default",
+  "cmd-claimflag-pve-desc": "Toggle mob damage: /claimflag pve on|off|default",
+  "cmd-claimflag-status-desc": "Show current claim flags.",
+
+  "err-players-only": "This command is only available to players.",
+  "err-not-in-claim": "You are not standing inside a claim.",
+  "err-no-permission": "You do not have permission to manage this claim.",
+  "err-invalid-value": "Use: on, off or default.",
+
+  "flag-set": "Flag {0} for claim '{1}' set to '{2}'.",
+  "flag-reset": "Flag {0} for claim '{1}' reset to global default.",
+
+  "claim-status-empty": "Claim '{0}': no flags set. Using global settings.",
+  "claim-status-full": "Claim '{0}': PvP = {1}, PvE = {2}.",
+
+  "value-default": "default",
+  "value-allowed": "allowed",
+  "value-denied": "denied"
 }

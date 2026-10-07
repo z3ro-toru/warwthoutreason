@@ -5,26 +5,26 @@ using Vintagestory.API.Server;
 
 namespace warwthtreason.Server
 {
-    // Postfix на ShouldReceiveDamage — метод возвращает bool "должен ли игрок получить урон".
-    // Мы переигрываем результат с true на false, если урон должен быть заблокирован.
+    // Postfix on ShouldReceiveDamage — method returns bool "should the player receive damage".
+    // We override the result from true to false if the damage should be blocked.
     [HarmonyPatch(typeof(EntityPlayer), nameof(EntityPlayer.ShouldReceiveDamage))]
     public static class ClaimProtectionPatch
     {
         static void Postfix(EntityPlayer __instance, DamageSource damageSource, ref bool __result)
         {
-            // Игра уже решила не наносить урон — не вмешиваемся.
+            // Game already decided not to deal damage — don't interfere.
             if (!__result || __instance.World?.Side != EnumAppSide.Server) return;
             if (damageSource == null) return;
 
             var system = CombatLogSystemAccessor.Instance;
             if (system == null || !system.Config.EnableClaimProtection) return;
 
-            // Определяем тип урона. Реагируем только на PvP и PvE.
+            // Determine the type of damage. Responding only to PvP and PvE.
             bool isPlayerDamage = damageSource.Source == EnumDamageSource.Player;
             bool isPveDamage = damageSource.Source == EnumDamageSource.Entity;
             if (!isPlayerDamage && !isPveDamage) return;
 
-            // Для PvP получаем атакующего.
+            // Attack side: For PvP we get the attacker.
             EntityPlayer? attacker = null;
             if (isPlayerDamage)
             {
@@ -33,7 +33,7 @@ namespace warwthtreason.Server
                 if (attacker.EntityId == __instance.EntityId) return;
             }
 
-            // --- Проверяем позиции обеих сторон ---
+            // --- Check positions of both sides ---
             var victimClaims = system.GetClaimsAt(__instance.Pos.AsBlockPos);
             LandClaim? victimClaim = victimClaims?.Length > 0 ? victimClaims[0] : null;
 
@@ -44,7 +44,7 @@ namespace warwthtreason.Server
                 attackerClaim = attackerClaims?.Length > 0 ? attackerClaims[0] : null;
             }
 
-            // Если никто не в привате — урон проходит по стандартным правилам.
+            // If nobody is in a claim — damage is permitted.
             if (victimClaim == null && attackerClaim == null) return;
 
             // --- PvP ---
@@ -60,11 +60,11 @@ namespace warwthtreason.Server
                         return;
                 }
 
-                // Per-claim флаги: если в любом из приватов PvP разрешён — урон проходит.
+                // Per-claim flags: if in any of claims PvP is allowed — damage is permitted.
                 if (victimClaim != null && system.GetClaimFlags(victimClaim)?.AllowPvP == true) return;
                 if (attackerClaim != null && system.GetClaimFlags(attackerClaim)?.AllowPvP == true) return;
 
-                // Глобальная настройка.
+                // Global setting.
                 if (!system.Config.PreventPvPInClaims) return;
                 __result = false;
                 return;

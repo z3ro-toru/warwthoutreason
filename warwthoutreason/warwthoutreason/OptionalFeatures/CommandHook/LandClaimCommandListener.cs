@@ -1,12 +1,11 @@
-﻿using System;
+﻿/*using System;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
-//using CommandHook;
+using CommandHook;
 
 namespace warwthtreason.Server
 {
-    // Слушатель CommandHook. Реализация интерфейса ICommandListener
-    // требует наличия методов Before и After.
+    // CommandHook listener for land claim commands. This allows us to intercept the /land claim allowpvp and /land claim allowpve commands
     public class LandClaimCommandListener : CommandHook.ICommandListener
     {
         private readonly CombatLogSystem system;
@@ -16,14 +15,14 @@ namespace warwthtreason.Server
             this.system = system;
         }
 
-        // Список команд, которые мы слушаем. CommandHook матчит их по полному пути.
+        // List of commands we listen to. CommandHook matches them by full path.
         public string[] Commands => new[]
         {
             "land claim allowpvp",
             "land claim allowpve"
         };
 
-        // Before вызывается до оригинальной команды. Возврат не-null отменяет её выполнение.
+        // Before is called before the command is executed. We can return a TextCommandResult to cancel the command and send a message to the player.
         public TextCommandResult? Before(TextCommandCallingArgs args)
         {
             string command = args.Command;
@@ -38,11 +37,11 @@ namespace warwthtreason.Server
 
         public void After(TextCommandCallingArgs args)
         {
-            // Не используется.
+            // not used.
         }
 
-        // Общая логика переключения флага. Копия логики ToggleClaimFlag,
-        // но вызывается из CommandHook, а не из команды /claimflag.
+        // Main logic for handling the toggle of PvP/PvE flags in land claims. 
+        // This checks if the player is in a claim, has access, and toggles the flag accordingly.
         private TextCommandResult HandleToggle(TextCommandCallingArgs args, bool isPvP)
         {
             if (args.Caller.Player is not IServerPlayer player)
@@ -60,7 +59,7 @@ namespace warwthtreason.Server
             if (!hasAccess)
                 return TextCommandResult.Error("У вас нет прав на управление этим приватом.");
 
-            // Переключаем флаг: on → off, off → on, default → on.
+            // swiitching the flag. false - disabling, true - enabling. default - true.
             string claimId = system.GetClaimId(claim);
             var flags = system.GetClaimFlags(claim);
 
@@ -68,9 +67,9 @@ namespace warwthtreason.Server
                 ? (flags?.AllowPvP ?? system.Config.PreventPvPInClaims ? false : true)
                 : (flags?.AllowPvE ?? system.Config.PreventPvEInClaims ? false : true);
 
-            // Инвертируем текущее значение. Мы не можем напрямую писать в claimFlagsConfig отсюда,
-            // поэтому делегируем это через публичный метод системы.
+            // Current value inverting. We can't directly write to claimFlagsConfig from here,
+            // therefore, we delegate this through the public method of the system.
             return system.ToggleClaimFlagDirect(player, isPvP, !currentValue);
         }
     }
-}
+}*/

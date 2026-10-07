@@ -1,4 +1,8 @@
-﻿using System;
+﻿// A patch for the Prefix method of the SafeZone patch. By returning false from our Prefix,
+// we do not allow SafeZone's Prefix to be executed — and SafeZone does not block damage.
+// targetMethod is looking for SafeZone.Patch_Entity_ReceiveDamage.Prefix in uploaded builds.
+// If SafeZone is not installed, we return null — Harmony will skip the patch.
+using System;
 using System.Reflection;
 using HarmonyLib;
 using Vintagestory.API.Common;
@@ -7,14 +11,14 @@ using Vintagestory.API.Server;
 
 namespace warwthtreason.Server
 {
-    // Патч на метод Prefix патча SafeZone. Возвращая false из нашего Prefix,
-    // мы не даём SafeZone'вскому Prefix выполниться — и SafeZone не блокирует урон.
+    
     [HarmonyPatch]
     public static class SafeZoneCombatOverridePatch
     {
-        // TargetMethod ищет SafeZone.Patch_Entity_ReceiveDamage.Prefix в загруженных сборках.
-        // Если SafeZone не установлен, возвращаем null — Harmony пропустит патч.
+#pragma warning disable CA1859
+        
         static MethodBase? TargetMethod()
+#pragma warning restore CA1859
         {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -27,8 +31,8 @@ namespace warwthtreason.Server
             return null;
         }
 
-        // __0 — первый аргумент целевого метода (Entity, получатель урона).
-        // __1 — второй аргумент (DamageSource).
+        // __0 — 1st arg of target method (Entity, damage recipient).
+        // __1 — 2nd arg (DamageSource).
         static bool Prefix(Entity __0, DamageSource __1)
         {
             var system = CombatLogSystemAccessor.Instance;
@@ -45,7 +49,7 @@ namespace warwthtreason.Server
 
             if (attacker == victim) return true;
 
-            // Если кто-то в бою — пропускаем проверку SafeZone (возвращаем false).
+            // If either the attacker or the victim is in combat, we do not block damage.
             if (system.IsInCombat(attacker) || system.IsInCombat(victim))
             {
                 return false;

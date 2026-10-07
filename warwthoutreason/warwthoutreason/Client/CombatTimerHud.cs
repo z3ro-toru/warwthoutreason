@@ -5,11 +5,11 @@ namespace warwthtreason.Client
 {
     public class CombatTimerHud : HudElement
     {
-        private GuiElementDynamicText? timerText;
+        private readonly GuiElementDynamicText? timerText;
 
         public CombatTimerHud(ICoreClientAPI capi) : base(capi)
         {
-            // Композер — контейнер для элементов HUD. Привязка: верхний центр экрана.
+            // A compositor is a container for HUD elements. It's anchored to the top center of the screen.
             var composer = capi.Gui.CreateCompo("combattimerhud",
                 ElementBounds.Fixed(EnumDialogArea.CenterTop, 0, 80, 400, 50));
 
@@ -23,7 +23,7 @@ namespace warwthtreason.Client
             timerText = SingleComposer.GetDynamicText("combattimer");
         }
 
-        // Обновляет текст HUD. Пустая строка = элемент не отображается визуально.
+        // Updates the HUD text. An empty string = the element is not displayed visually.
         public void SetTime(int seconds)
         {
             if (timerText == null) return;

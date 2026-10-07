@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Server\LandClaimCommandListener.cs" />
+    <Compile Remove="OptionalFeatures\LandClaimCommandListener.cs" />
   </ItemGroup>
 
   <ItemGroup>

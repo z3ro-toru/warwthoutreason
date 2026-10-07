@@ -13,8 +13,7 @@ namespace warwthtreason.Client
         {
             capi = api;
 
-            // Канал должен совпадать с серверным ("warwthtreason").
-            api.Network.RegisterChannel("warwthtreason")
+                api.Network.RegisterChannel("warwthtreason")
                 .RegisterMessageType<CombatTimerPacket>()
                 .SetMessageHandler<CombatTimerPacket>(OnTimerPacket);
 

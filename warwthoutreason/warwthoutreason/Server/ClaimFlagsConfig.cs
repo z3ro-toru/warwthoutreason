@@ -1,24 +1,23 @@
-﻿using System.Collections.Generic;
+﻿// Config for per-claim flags. Look in ModConfig/WWRClaimFlags.json
+// This allows server admins and players to set PvP/PvE permissions for specific land claims.
+// The key is a unique ID for the claim (generated from corner coordinates), and the value is a set of flags for that claim.
+// The flags can be true (allowed), false (disallowed), or null (use global setting). Same for PvE.
+// This is used in conjunction with the CombatLogSystem to determine if combat is allowed in a claim.
+
+using System.Collections.Generic;
 
 namespace warwthtreason.Server
 {
-    // Конфиг для per-claim флагов. Сериализуется в ModConfig/ClaimFlags.json.
+    // 
     public class ClaimFlagsConfig
-    {
-        // Ключ — уникальный ID привата (генерируется из координат углов).
-        // Значение — набор флагов для этого привата.
-        public Dictionary<string, ClaimFlags> Flags { get; set; } = new Dictionary<string, ClaimFlags>();
+    {        
+        public Dictionary<string, ClaimFlags> Flags { get; set; } = [];
     }
-
-    // Набор флагов одного привата.
+        
     public class ClaimFlags
     {
-        // null — используется глобальная настройка PreventPvPInClaims.
-        // true — PvP разрешён в этом привате.
-        // false — PvP запрещён в этом привате.
         public bool? AllowPvP { get; set; } = null;
-
-        // Аналогично для PvE.
+                
         public bool? AllowPvE { get; set; } = null;
     }
 }

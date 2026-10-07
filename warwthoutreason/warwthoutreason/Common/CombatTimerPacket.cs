@@ -1,14 +1,15 @@
-﻿using ProtoBuf;
+﻿// The packet transmits to the client how many seconds are left before exiting the battle.
+// The [ProtoContract] attribute is required — marks the class as a serializable ProtoBuf.
+// [ProtoMember(1)] is the ordinal number of the field. DO NOT CHANGE THE NUMBERS OF EXISTING FIELDS,
+// otherwise the client and server will cease to understand each other.
+
+using ProtoBuf;
 
 namespace warwthtreason.Common
-{
-    // Пакет передаёт клиенту, сколько секунд осталось до выхода из боя.
-    // Атрибут [ProtoContract] обязателен — он помечает класс как сериализуемый ProtoBuf.
+{    
     [ProtoContract]
     public class CombatTimerPacket
-    {
-        // [ProtoMember(1)] — порядковый номер поля. Не меняйте номера существующих полей,
-        // иначе клиент и сервер перестанут понимать друг друга.
+    {        
         [ProtoMember(1)]
         public int RemainingSeconds { get; set; }
     }

@@ -1,30 +1,29 @@
+// Config file. Look in ModConfig/WarWithoutReason.json.
+
 namespace warwthtreason.Server
 {
-    // Основной конфиг мода. Сериализуется в ModConfig/WarWithoutReason.json.
+    
     public class CombatLogConfig
     {
-        // Длительность режима боя в секундах.
+        // Duration of the combat mode in seconds. Default is 30 seconds.
         public int CombatDurationSeconds { get; set; } = 30;
 
-        // Отправлять ли сообщения в чат при входе/выходе из боя.
+        // Whether to send messages to the chat when entering/exiting combat.
         public bool SendChatMessages { get; set; } = true;
 
-        // Показывать ли крупные уведомления на экране.
+        // Whether to show large notifications on the screen.
         public bool ShowScreenMessages { get; set; } = true;
 
-        // Убивать ли игрока, вышедшего из игры во время боя.
+        // Whether to kill the player who logs out during combat.
         public bool KillOnCombatLogout { get; set; } = true;
 
-        // Включает собственную систему защиты приватов.
-        // Автоматически отключается при обнаружении SafeZone.
+        // Enables in-built claim protection system. Automatically disabled when a SafeZone is detected.
         public bool EnableClaimProtection { get; set; } = true;
 
-        // Глобальный запрет PvP в приватах.
-        // Переопределяется per-claim флагом AllowPvP.
+        // Global ban on PvP in claims. Overridden by the per-claim flag AllowPvP.
         public bool PreventPvPInClaims { get; set; } = true;
 
-        // Глобальный запрет PvE (урон от мобов) в приватах.
-        // По умолчанию выключен, чтобы мобы атаковали как обычно.
+        // Global ban on PvE (damage from mobs) in claims. Disabled by default to allow mobs to attack as usual.
         public bool PreventPvEInClaims { get; set; } = false;
     }
 }
