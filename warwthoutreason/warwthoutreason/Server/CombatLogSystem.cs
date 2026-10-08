@@ -174,6 +174,7 @@ namespace warwthtreason.Server
         {
             sapi.ChatCommands.Create("claimflag")
                 .WithDescription(Lang.Get("warwthtreason:cmd-claimflag-desc"))
+                .RequiresPlayer()   // <-- обязательно, иначе API не даёт выполнить команду
                 .BeginSubCommand("pvp")
                     .WithDescription(Lang.Get("warwthtreason:cmd-claimflag-pvp-desc"))
                     .WithArgs(sapi.ChatCommands.Parsers.Word("value"))
@@ -189,7 +190,7 @@ namespace warwthtreason.Server
                     .HandleWith(OnShowClaimStatus)
                 .EndSubCommand();
         }
-                
+
         private bool CanManageClaimFlags(IServerPlayer player)
         {
             if (config.AllowPlayersToManageClaimFlags) return true;
@@ -336,6 +337,7 @@ namespace warwthtreason.Server
                 }
 
                 int seconds = (int)Math.Ceiling(remainingMs / 1000.0);
+                sapi.Logger.Notification($"[WWR DEBUG] Sending timer {seconds}s to {player.PlayerName}");
                 serverChannel?.SendPacket(new CombatTimerPacket { RemainingSeconds = seconds }, player);
             }
 

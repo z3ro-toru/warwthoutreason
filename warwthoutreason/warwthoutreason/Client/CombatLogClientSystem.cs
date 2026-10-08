@@ -23,6 +23,7 @@ namespace warwthtreason.Client
 
         private void OnTimerPacket(CombatTimerPacket packet)
         {
+            capi.Logger.Notification($"[WWR DEBUG] Received timer: {packet.RemainingSeconds}s");
             hud?.SetTime(packet.RemainingSeconds);
         }
     }

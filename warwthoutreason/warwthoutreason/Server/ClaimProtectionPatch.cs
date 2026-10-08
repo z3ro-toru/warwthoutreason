@@ -1,105 +1,68 @@
 ﻿using HarmonyLib;
 using Vintagestory.API.Common;
-using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
 
 namespace warwthtreason.Server
 {
-    // Postfix on ShouldReceiveDamage — method returns bool "should the player receive damage".
-    // We override the result from true to false if the damage should be blocked.
+    // Postfix on EntityPlayer.ShouldReceiveDamage. Sets __result to false
+    // when damage should be blocked by claim protection.
     [HarmonyPatch(typeof(EntityPlayer), nameof(EntityPlayer.ShouldReceiveDamage))]
     public static class ClaimProtectionPatch
     {
         static void Postfix(EntityPlayer __instance, DamageSource damageSource, ref bool __result)
         {
-            // Game already decided not to deal damage — don't interfere.
             if (!__result || __instance.World?.Side != EnumAppSide.Server) return;
-            if (damageSource == null) return;
 
             var system = CombatLogSystemAccessor.Instance;
             if (system == null || !system.Config.EnableClaimProtection) return;
 
-            // Determine the type of damage. Responding only to PvP and PvE.
-            bool isPlayerDamage = damageSource.Source == EnumDamageSource.Player;
-            bool isPveDamage = damageSource.Source == EnumDamageSource.Entity;
-            if (!isPlayerDamage && !isPveDamage) return;
+            var ctx = DamageContextResolver.Resolve(__instance, damageSource);
+            if (ctx == null) return;
 
-            // Attack side: For PvP we get the attacker.
-            EntityPlayer? attacker = null;
-            if (isPlayerDamage)
-            {
-                attacker = damageSource.GetCauseEntity() as EntityPlayer;
-                if (attacker == null) return;
-                if (attacker.EntityId == __instance.EntityId) return;
-            }
-
-            // --- Check positions of both sides ---
-            var victimClaims = system.GetClaimsAt(__instance.Pos.AsBlockPos);
-            LandClaim? victimClaim = victimClaims?.Length > 0 ? victimClaims[0] : null;
-
-            LandClaim? attackerClaim = null;
-            if (attacker != null)
-            {
-                var attackerClaims = system.GetClaimsAt(attacker.Pos.AsBlockPos);
-                attackerClaim = attackerClaims?.Length > 0 ? attackerClaims[0] : null;
-            }
-
-            // If nobody is in a claim — damage is permitted.
-            if (victimClaim == null && attackerClaim == null) return;
+            // If neither side is inside a claim, our rules don't apply.
+            if (ctx.VictimClaim == null && ctx.AttackerClaim == null) return;
 
             // --- PvP ---
-            // --- PvP ---
-            if (isPlayerDamage && attacker != null)
+            if (ctx.IsPvP && ctx.Attacker != null)
             {
-                var attackerPlayer = attacker.Player as IServerPlayer;
-                var victimPlayer = __instance.Player as IServerPlayer;
+                // 1. Mutual chase — both already fighting.
+                if (ctx.AttackerInCombat && ctx.VictimInCombat)
+                    return;
 
-                if (attackerPlayer != null && victimPlayer != null)
+                // 2. Peaceful attacker in a claim strikes a combat target.
+                if (!ctx.AttackerInCombat && ctx.VictimInCombat && ctx.AttackerClaim != null)
                 {
-                    bool attackerInCombat = system.IsInCombat(attackerPlayer);
-                    bool victimInCombat = system.IsInCombat(victimPlayer);
-
-                    // 1. Mutual chase — both already fighting. Damage passes.
-                    //    This is the intended "pursuit into safe zones" mechanic.
-                    if (attackerInCombat && victimInCombat)
-                        return;
-
-                    // 2. Peaceful attacker strikes a combat target. Only possible
-                    //    when the attacker stands inside a claim.
-                    if (!attackerInCombat && victimInCombat && attackerClaim != null)
+                    if (system.Config.AllowOwnerDefenseInClaims)
                     {
-                        // 2a. Owner defense — attacker has build rights in their claim.
-                        if (system.Config.AllowOwnerDefenseInClaims)
-                        {
-                            bool attackerIsOwner = system.Sapi.World.Claims.TryAccess(
-                                attackerPlayer,
-                                attackerPlayer.Entity.Pos.AsBlockPos,
-                                EnumBlockAccessFlags.BuildOrBreak);
+                        bool attackerIsOwner = system.Sapi.World.Claims.TryAccess(
+                            ctx.Attacker,
+                            ctx.AttackerEntity!.Pos.AsBlockPos,
+                            EnumBlockAccessFlags.BuildOrBreak);
 
-                            if (attackerIsOwner) return;
-                        }
-
-                        // 2b. Open defense — any peaceful player in any claim.
-                        if (system.Config.AllowOpenDefenseInClaims)
-                            return;
+                        if (attackerIsOwner) return;
                     }
+
+                    if (system.Config.AllowOpenDefenseInClaims)
+                        return;
                 }
 
                 // 3. Per-claim flags.
-                if (victimClaim != null && system.GetClaimFlags(victimClaim)?.AllowPvP == true) return;
-                if (attackerClaim != null && system.GetClaimFlags(attackerClaim)?.AllowPvP == true) return;
+                if (ctx.VictimClaim != null && system.GetClaimFlags(ctx.VictimClaim)?.AllowPvP == true) return;
+                if (ctx.AttackerClaim != null && system.GetClaimFlags(ctx.AttackerClaim)?.AllowPvP == true) return;
 
                 // 4. Global config fallback.
                 if (!system.Config.PreventPvPInClaims) return;
+
                 __result = false;
                 return;
             }
 
             // --- PvE ---
-            if (isPveDamage)
+            if (ctx.IsPvE)
             {
-                if (victimClaim != null && system.GetClaimFlags(victimClaim)?.AllowPvE == true) return;
+                if (ctx.VictimClaim != null && system.GetClaimFlags(ctx.VictimClaim)?.AllowPvE == true) return;
                 if (!system.Config.PreventPvEInClaims) return;
+
                 __result = false;
                 return;
             }

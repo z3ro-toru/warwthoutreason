@@ -8,7 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="OptionalFeatures\LandClaimCommandListener.cs" />
+    <Compile Remove="OptionalFeatures\CommandHook\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+	<Content Include="assets\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -67,6 +71,7 @@
 </ItemGroup>
 
 <ItemGroup>
+  <PackageReference Include="Cake.Compression" Version="0.4.0" />
   <PackageReference Include="Cake.Core" Version="6.3.0" />
   <PackageReference Include="Lib.Harmony" Version="2.4.2" />
 </ItemGroup>

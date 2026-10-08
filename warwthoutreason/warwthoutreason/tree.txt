@@ -1,0 +1,77 @@
+Структура папок тома DATA
+Серийный номер тома: 5247-E2C4
+E:.
+|   modinfo.json
+|   tree.txt
+|   warwthtreason.csproj
+|   warwthtreason.csproj.user
+|   
++---assets
+|   \---warwthtreason
+|       \---lang
+|               en.json
+|               ru.json
+|               
++---bin
+|   \---Debug
+|       \---Mods
+|           \---mod
+|                   modinfo.json
+|                   warwthtreason.deps.json
+|                   warwthtreason.dll
+|                   warwthtreason.pdb
+|                   wwr-1.1.1-dev.2FIXED.zip
+|                   
++---Client
+|       CombatLogClientSystem.cs
+|       CombatTimerHud.cs
+|       
++---Common
+|       CombatTimerPacket.cs
+|       
++---obj
+|   |   project.assets.json
+|   |   project.nuget.cache
+|   |   warwthtreason.csproj.nuget.dgspec.json
+|   |   warwthtreason.csproj.nuget.g.props
+|   |   warwthtreason.csproj.nuget.g.targets
+|   |   
+|   \---Debug
+|       |   .NETCoreApp,Version=v10.0.AssemblyAttributes.cs
+|       |   warwthtr.61D8495C.Up2Date
+|       |   warwthtreason.AssemblyInfo.cs
+|       |   warwthtreason.AssemblyInfoInputs.cache
+|       |   warwthtreason.assets.cache
+|       |   warwthtreason.csproj.AssemblyReference.cache
+|       |   warwthtreason.csproj.CoreCompileInputs.cache
+|       |   warwthtreason.csproj.FileListAbsolute.txt
+|       |   warwthtreason.dll
+|       |   warwthtreason.GeneratedMSBuildEditorConfig.editorconfig
+|       |   warwthtreason.pdb
+|       |   warwthtreason.sourcelink.json
+|       |   
+|       +---ref
+|       |       warwthtreason.dll
+|       |       
+|       \---refint
+|               warwthtreason.dll
+|               
++---OptionalFeatures
+|   \---CommandHook
+|           LandClaimCommandListener.cs
+|           
++---Properties
+|       launchSettings.json
+|       
+\---Server
+    |   ClaimFlagsConfig.cs
+    |   ClaimProtectionPatch.cs
+    |   CombatLogConfig.cs
+    |   CombatLogSystem.cs
+    |   DamageContext.cs
+    |   
+    \---Compatibility
+            CombatInClaimStrategy.cs
+            DisablePvPInsideClaimsCombatPatch.cs
+            SafeZoneCombatOverridePatch.cs
+            

@@ -56,6 +56,7 @@
 		<PackageReference Include="Cake.Frosting" Version="6.3.0" />
 		<PackageReference Include="Cake.Json" Version="11.0.0" />
 		<PackageReference Include="Lib.Harmony" Version="2.4.2" />
+		<PackageReference Include="Cake.Compression" Version="0.4.0" />
 	</ItemGroup>
 
 </Project>
