@@ -1,7 +1,11 @@
-﻿// A patch for the Prefix method of the SafeZone patch. By returning false from our Prefix,
-// we do not allow SafeZone's Prefix to be executed — and SafeZone does not block damage.
-// targetMethod is looking for SafeZone.Patch_Entity_ReceiveDamage.Prefix in uploaded builds.
-// If SafeZone is not installed, we return null — Harmony will skip the patch.
+﻿// Compatibility with DisablePvPInsideClaims.
+//
+// Their Postfix blocks all PvP damage inside claims, breaking the chase mechanic.
+// This is resolved by adding a Prefix: in combat state, it returns false,
+// forcing Harmony to skip their Postfix.
+//
+// If DisablePvPInsideClaims is missing, TargetMethod() returns null (the patch is skipped).
+
 using System;
 using System.Reflection;
 using HarmonyLib;
@@ -13,26 +17,27 @@ namespace warwthtreason.Server
 {
     
     [HarmonyPatch]
-    public static class SafeZoneCombatOverridePatch
+    public static class DisablePvPInsideClaimsCombatPatch
     {
-#pragma warning disable CA1859
-        
+        // Resolve DisablePvPInsideClaims.DisablePvPInsideClaimsModSystem
+        //   .ShouldReceiveDamagePostfix from loaded assemblies.
         static MethodBase? TargetMethod()
-#pragma warning restore CA1859
         {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
-                var patchType = asm.GetType("SafeZone.Patch_Entity_ReceiveDamage");
-                if (patchType != null)
+                var type = asm.GetType("DisablePvPInsideClaims.DisablePvPInsideClaimsModSystem");
+                if (type != null)
                 {
-                    return AccessTools.Method(patchType, "Prefix");
+                    return AccessTools.Method(type, "ShouldReceiveDamagePostfix");
                 }
             }
             return null;
         }
 
-        // __0 — 1st arg of target method (Entity, damage recipient).
-        // __1 — 2nd arg (DamageSource).
+        // __0 = EntityPlayer (victim), matches their "__instance".
+        // __1 = DamageSource, matches their "damageSource".
+        // Return false → skip their Postfix body.
+        // Return true  → let them run and decide normally.
         static bool Prefix(Entity __0, DamageSource __1)
         {
             var system = CombatLogSystemAccessor.Instance;

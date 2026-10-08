@@ -48,23 +48,48 @@ namespace warwthtreason.Server
             if (victimClaim == null && attackerClaim == null) return;
 
             // --- PvP ---
+            // --- PvP ---
             if (isPlayerDamage && attacker != null)
             {
-                // Исключение для боя: если кто-то из участников "в бою", урон разрешён.
                 var attackerPlayer = attacker.Player as IServerPlayer;
                 var victimPlayer = __instance.Player as IServerPlayer;
 
                 if (attackerPlayer != null && victimPlayer != null)
                 {
-                    if (system.IsInCombat(attackerPlayer) || system.IsInCombat(victimPlayer))
+                    bool attackerInCombat = system.IsInCombat(attackerPlayer);
+                    bool victimInCombat = system.IsInCombat(victimPlayer);
+
+                    // 1. Mutual chase — both already fighting. Damage passes.
+                    //    This is the intended "pursuit into safe zones" mechanic.
+                    if (attackerInCombat && victimInCombat)
                         return;
+
+                    // 2. Peaceful attacker strikes a combat target. Only possible
+                    //    when the attacker stands inside a claim.
+                    if (!attackerInCombat && victimInCombat && attackerClaim != null)
+                    {
+                        // 2a. Owner defense — attacker has build rights in their claim.
+                        if (system.Config.AllowOwnerDefenseInClaims)
+                        {
+                            bool attackerIsOwner = system.Sapi.World.Claims.TryAccess(
+                                attackerPlayer,
+                                attackerPlayer.Entity.Pos.AsBlockPos,
+                                EnumBlockAccessFlags.BuildOrBreak);
+
+                            if (attackerIsOwner) return;
+                        }
+
+                        // 2b. Open defense — any peaceful player in any claim.
+                        if (system.Config.AllowOpenDefenseInClaims)
+                            return;
+                    }
                 }
 
-                // Per-claim flags: if in any of claims PvP is allowed — damage is permitted.
+                // 3. Per-claim flags.
                 if (victimClaim != null && system.GetClaimFlags(victimClaim)?.AllowPvP == true) return;
                 if (attackerClaim != null && system.GetClaimFlags(attackerClaim)?.AllowPvP == true) return;
 
-                // Global setting.
+                // 4. Global config fallback.
                 if (!system.Config.PreventPvPInClaims) return;
                 __result = false;
                 return;

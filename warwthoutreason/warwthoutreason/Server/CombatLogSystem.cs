@@ -27,9 +27,8 @@ namespace warwthtreason.Server
         // Key: PlayerUID. Value: combat end time (ElapsedMilliseconds + duration).
         private readonly Dictionary<string, long> combatTimers = [];
 
-        // Stores the exact delegate we subscribed to onDamaged, so we can
-        // unsubscribe later. Without this, we would leak subscriptions and
-        // potentially get double-handling on reconnect.
+        // Stores delegates subscribed to onDamaged for subsequent unsubscription.
+        // Prevents memory leaks and re-processing during reconnection.
         private readonly Dictionary<string, OnDamagedDelegate> damageHandlers = [];
 
         // === Infrastructure ===
@@ -44,6 +43,13 @@ namespace warwthtreason.Server
         // Public flag toggle used by the optional CommandHook listener.
         public TextCommandResult ToggleClaimFlagDirect(IServerPlayer player, bool isPvP, bool value)
         {
+
+            if (player == null)
+                return TextCommandResult.Error("Player is null.");
+
+            if (!CanManageClaimFlags(player))
+                return TextCommandResult.Error(Lang.GetL(player.LanguageCode, "warwthtreason:err-flag-management-disabled"));
+
             var claims = sapi.World.Claims.Get(player.Entity.Pos.AsBlockPos);
             if (claims == null || claims.Length == 0)
                 return TextCommandResult.Error(Lang.GetL(player.LanguageCode, "warwthtreason:err-not-in-claim"));
@@ -71,7 +77,22 @@ namespace warwthtreason.Server
         {
             sapi = api;
 
-            // --- Load main config ---
+            // Isolated initialization steps: to simplify log diagnostics and add new features.
+            InitializeConfigs();          // 1. Load WarWithoutReason.json + WWR_ClaimFlags.json
+            CheckModCompatibility();      // 2. Detect SafeZone / DisablePvPInsideClaims / other mods
+            RegisterEventHandlers();      // 3. Player join/leave + game tick
+            InitializeNetwork();          // 4. Channel + CombatTimerPacket
+            InitializeHarmony();          // 5. PatchAll + accessor wiring
+            RegisterClaimFlagCommands();  // 6. /claimflag command tree
+
+            sapi.Logger.Notification("[WarWithoutReason] Server-side initialization complete.");
+        }
+
+        // --- Step 1: Configs ---
+        // Loads, validates, and adds default JSON configs.
+        // Saves the result to disk so that admins can see the new fields after updates.
+        private void InitializeConfigs()
+        {
             config = sapi.LoadModConfig<CombatLogConfig>("WarWithoutReason.json");
             if (config == null)
             {
@@ -85,44 +106,68 @@ namespace warwthtreason.Server
             }
             sapi.StoreModConfig(config, "WarWithoutReason.json");
 
-            // --- Load per-claim flags ---
             claimFlagsConfig = sapi.LoadModConfig<ClaimFlagsConfig>("WWR_ClaimFlags.json");
             if (claimFlagsConfig == null)
             {
                 claimFlagsConfig = new ClaimFlagsConfig();
                 sapi.StoreModConfig(claimFlagsConfig, "WWR_ClaimFlags.json");
             }
+        }
 
-            // --- SafeZone detection ---
+        // --- Step 2: Optional mod detection ---
+        // In case of mod conflict, in-built claim function disables to avoid duplication.
+        // other features keeps working
+        private void CheckModCompatibility()
+        {
+            // SafeZone: handles both PvP and PvE inside claims.
             if (sapi.ModLoader.IsModEnabled("safezone"))
             {
                 sapi.Logger.Notification("[WarWithoutReason] SafeZone detected. Built-in claim protection disabled.");
                 config.EnableClaimProtection = false;
                 sapi.StoreModConfig(config, "WarWithoutReason.json");
-            }
-            else
-            {
-                sapi.Logger.Notification("[WarWithoutReason] SafeZone not detected. Built-in claim protection enabled.");
+                return;
             }
 
-            // --- Event subscriptions ---
+            // DisablePvPInsideClaims: handles PvP only.
+            if (sapi.ModLoader.IsModEnabled("disablepvpinsideclaims"))
+            {
+                sapi.Logger.Notification("[WarWithoutReason] DisablePvPInsideClaims detected. Built-in claim protection disabled.");
+                config.EnableClaimProtection = false;
+                sapi.StoreModConfig(config, "WarWithoutReason.json");
+                return;
+            }
+
+            sapi.Logger.Notification("[WarWithoutReason] No conflicting claim-protection mod found. Built-in protection enabled.");
+        }
+
+        // --- Step 3: Event subscriptions ---
+        private void RegisterEventHandlers()
+        {
             sapi.Event.PlayerJoin += OnPlayerJoin;
             sapi.Event.PlayerLeave += OnPlayerLeave;
             tickListenerId = sapi.Event.RegisterGameTickListener(OnGameTick, 1000);
+        }
 
-            // --- Network channel for the HUD timer ---
+        // --- Step 4: Network channel ---
+        private void InitializeNetwork()
+        {
             serverChannel = sapi.Network.RegisterChannel("warwthtreason")
                 .RegisterMessageType<CombatTimerPacket>();
+        }
 
-            // --- Harmony ---
+        // --- Step 5: Harmony patches ---
+        private void InitializeHarmony()
+        {
             harmony = new Harmony(Mod.Info.ModID);
-            harmony.PatchAll();
             CombatLogSystemAccessor.Instance = this;
 
-            // --- /claimflag command ---
-            RegisterClaimFlagCommands();
 
-            sapi.Logger.Notification("[WarWithoutReason] Server-side initialization complete.");
+            // Delay PatchAll until all mods are loaded, so we can find other mods' types.
+            sapi.Event.ServerRunPhase(EnumServerRunPhase.ModsAndConfigReady, () =>
+                { 
+                    harmony.PatchAll();
+                    sapi.Logger.Notification("[WarWithoutReason] Harmony patches applied");
+                });
         }
 
         private void RegisterClaimFlagCommands()
@@ -143,6 +188,16 @@ namespace warwthtreason.Server
                     .WithDescription(Lang.Get("warwthtreason:cmd-claimflag-status-desc"))
                     .HandleWith(OnShowClaimStatus)
                 .EndSubCommand();
+        }
+                
+        private bool CanManageClaimFlags(IServerPlayer player)
+        {
+            if (config.AllowPlayersToManageClaimFlags) return true;
+
+            // Fallback: allow admins so they can still fix individual claims.
+            // Returns true if the given player is allowed to modify claim flags.
+            // Admins always pass, even when the config disables the feature for players.
+            return player.HasPrivilege(Privilege.root);
         }
 
         // === Player events ===
@@ -335,12 +390,12 @@ namespace warwthtreason.Server
         public bool IsInCombat(IServerPlayer player) => combatTimers.ContainsKey(player.PlayerUID);
 
         public LandClaim[]? GetClaimsAt(BlockPos pos) => sapi.World.Claims.Get(pos);
-
-        // Returns a unique string ID for a claim.
-        // Uses center coordinates because LandClaim has no public Index/Id,
-        // and claims cannot overlap, so centers are guaranteed unique.
+                
         public string GetClaimId(LandClaim claim)
         {
+            // Returns a unique string ID for a claim.
+            // Uses center coordinates because LandClaim has no public Index/Id,
+            // and claims cannot overlap, so centers are guaranteed unique.
             var center = claim.Center;
             return $"{center.X},{center.Y},{center.Z}";
         }
@@ -358,6 +413,10 @@ namespace warwthtreason.Server
         {
             if (args.Caller.Player is not IServerPlayer player)
                 return TextCommandResult.Error(Lang.Get("warwthtreason:err-players-only"));
+
+            // New check: is the player allowed to manage claim flags?
+            if (!CanManageClaimFlags(player))
+                return TextCommandResult.Error(Lang.GetL(player.LanguageCode, "warwthtreason:err-flag-management-disabled"));
 
             var claims = sapi.World.Claims.Get(player.Entity.Pos.AsBlockPos);
             if (claims == null || claims.Length == 0)

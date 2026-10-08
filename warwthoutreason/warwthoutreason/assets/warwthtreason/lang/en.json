@@ -11,6 +11,7 @@
   "cmd-claimflag-pve-desc": "Toggle mob damage: /claimflag pve on|off|default",
   "cmd-claimflag-status-desc": "Show current claim flags.",
 
+  "err-flag-management-disabled": "Claim flag management is disabled on this server. Contact an administrator.",
   "err-players-only": "This command is only available to players.",
   "err-not-in-claim": "You are not standing inside a claim.",
   "err-no-permission": "You do not have permission to manage this claim.",

@@ -11,6 +11,7 @@
   "cmd-claimflag-pve-desc": "Включить или выключить урон от мобов: /claimflag pve on|off|default",
   "cmd-claimflag-status-desc": "Показать текущие флаги привата.",
 
+  "err-flag-management-disabled": "Управление флагами приватов отключено на этом сервере. Обратитесь к администратору.",
   "err-players-only": "Команда доступна только игрокам.",
   "err-not-in-claim": "Вы не находитесь в привате.",
   "err-no-permission": "У вас нет прав на управление этим приватом.",
