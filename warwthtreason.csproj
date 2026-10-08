@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <Compile Remove="OptionalFeatures\CommandHook\*.cs" />
+    <Compile Remove="Releases\**" />
     <Compile Remove="ZZCakeBuild\**" />
   </ItemGroup>
 
@@ -17,8 +18,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Remove="Releases\**" />
     <EmbeddedResource Remove="ZZCakeBuild\**" />
+    <None Remove="Releases\**" />
     <None Remove="ZZCakeBuild\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="tree.txt" />
   </ItemGroup>
 
   <ItemGroup>
@@ -76,8 +83,5 @@
   </Content>
 </ItemGroup>
 
-<ItemGroup>
-  <PackageReference Include="Lib.Harmony" Version="2.4.2" />
-</ItemGroup>
 
 </Project>

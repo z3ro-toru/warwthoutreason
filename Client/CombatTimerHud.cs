@@ -17,7 +17,7 @@ namespace warwthtreason.Client
             // Добавляем динамический текст.
             composer.AddDynamicText(
                 "", // Изначально пустой
-                CairoFont.WhiteDetailText().WithFontSize(22),
+                CairoFont.WhiteDetailText().WithFontSize(20).WithOrientation(EnumTextOrientation.Center),
                 ElementBounds.Fixed(0, 0, 300, 40),
                 "combattimer");
 
