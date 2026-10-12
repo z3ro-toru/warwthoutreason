@@ -1,6 +1,7 @@
 ﻿using HarmonyLib;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
+using warwthtreason.Server.Diagnostics;
 
 namespace warwthtreason.Server
 {
@@ -11,13 +12,19 @@ namespace warwthtreason.Server
     {
         static void Postfix(EntityPlayer __instance, DamageSource damageSource, ref bool __result)
         {
-            if (!__result || __instance.World?.Side != EnumAppSide.Server) return;
+            if (!__result) return;
+            if (__instance.World?.Side != EnumAppSide.Server) return;
 
             var system = CombatLogSystemAccessor.Instance;
             if (system == null || !system.Config.EnableClaimProtection) return;
 
             var ctx = DamageContextResolver.Resolve(__instance, damageSource);
             if (ctx == null) return;
+
+            WWRDebug.Log(system.Sapi,
+                $"ClaimProtection: isPvP={ctx.IsPvP}, " +
+                $"attackerInCombat={ctx.AttackerInCombat}, victimInCombat={ctx.VictimInCombat}, " +
+                $"attackerClaim={ctx.AttackerClaim != null}, victimClaim={ctx.VictimClaim != null}");
 
             // If neither side is inside a claim, our rules don't apply.
             if (ctx.VictimClaim == null && ctx.AttackerClaim == null) return;

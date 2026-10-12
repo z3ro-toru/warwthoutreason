@@ -103,25 +103,38 @@ namespace CakeBuild
     {
         public override void Run(BuildContext context)
         {
+            // Ensure the Releases root exists, but do NOT wipe it — Debug and
+            // Release builds produce different ZIPs that should coexist.
             context.EnsureDirectoryExists("Releases");
-            context.CleanDirectory("Releases");
-            context.EnsureDirectoryExists($"Releases/{context.Name}");
 
+            // Wipe only the temporary staging folder for this mod.
+            string stagingDir = $"Releases/{context.Name}";
+            if (context.DirectoryExists(stagingDir))
+                context.DeleteDirectory(stagingDir, new DeleteDirectorySettings { Recursive = true, Force = true });
+
+            context.EnsureDirectoryExists(stagingDir);
+
+            // Copy the compiled DLL + deps from the correct configuration folder.
             context.CopyFiles(
                 $"bin/{context.BuildConfiguration}/Mods/mod/publish/*",
-                $"Releases/{context.Name}");
+                stagingDir);
 
+            // Copy lang files if they exist.
             if (context.DirectoryExists("assets"))
-                context.CopyDirectory("assets", $"Releases/{context.Name}/assets");
+                context.CopyDirectory("assets", $"{stagingDir}/assets");
 
-            context.CopyFile("modinfo.json", $"Releases/{context.Name}/modinfo.json");
+            // Copy the manifest.
+            context.CopyFile("modinfo.json", $"{stagingDir}/modinfo.json");
 
+            // Optional icon.
             if (context.FileExists("modicon.png"))
-                context.CopyFile("modicon.png", $"Releases/{context.Name}/modicon.png");
+                context.CopyFile("modicon.png", $"{stagingDir}/modicon.png");
 
+            // Zip with a configuration-specific name so Debug and Release
+            // don't overwrite each other.
             context.Zip(
-                $"Releases/{context.Name}",
-                $"Releases/{context.Name}_{context.Version}.zip");
+                stagingDir,
+                $"Releases/{context.Name}_{context.Version}_{context.BuildConfiguration}.zip");
         }
     }
 

@@ -1,37 +1,44 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Vintagestory.API.Server;
 
+using warwthtreason.Common;
+
 namespace warwthtreason.Server.DeadHand
 {
-    // Handles the combat-log punishment (aka "Karma" / "Dead Hand").
+    // Handles the combat-logout punishment.
     //
-    // When a player logs out while flagged as in-combat, we schedule them
-    // for a kill on their next login. The actual kill is deferred until
-    // rejoin, because at PlayerLeave the entity is already being despawned
-    // and calling Die() then leads to a race condition — vanilla then shows
-    // "killed by another player" instead of our custom message.
+    // Two policies:
+    //   KeepTimer — restore the remaining combat timer on next login. No kill.
+    //   Kill      — kill the player on next login. Legacy behavior.
+    //
+    // Both defer the actual action until rejoin, because at PlayerLeave the
+    // entity is already being despawned and calling Die() then leads to a
+    // race condition where vanilla shows "killed by another player" instead
+    // of our custom message.
     public class DeadHandManager
     {
         private readonly ICoreServerAPI sapi;
         private readonly CombatLogConfig config;
+        private readonly Action<IServerPlayer, int> restoreCombatTimer;
 
-        // Persistent list of UIDs scheduled for a kill on next login.
         private readonly PendingDeaths pendingDeaths;
+        private readonly Dictionary<string, string> playerNames = [];
 
-        // Caches player names by UID, so we can still display the name
-        // after the player leaves and PlayerName has been cleared.
-        private readonly Dictionary<string, string> playerNames = new();
-
-        public DeadHandManager(ICoreServerAPI sapi, CombatLogConfig config)
+        public DeadHandManager(
+    ICoreServerAPI sapi,
+    CombatLogConfig config,
+    Action<IServerPlayer, int> restoreCombatTimer)
         {
             this.sapi = sapi;
             this.config = config;
+            this.restoreCombatTimer = restoreCombatTimer;
 
-            pendingDeaths = sapi.LoadModConfig<PendingDeaths>("WWR_PendingDeaths.json")
-                ?? new PendingDeaths();
-            sapi.StoreModConfig(pendingDeaths, "WWR_PendingDeaths.json");
+            string path = $"{Constants.ConfigDir}/{Constants.ConfigPending}";
+            pendingDeaths = sapi.LoadModConfig<PendingDeaths>(path) ?? new PendingDeaths();
+            sapi.StoreModConfig(pendingDeaths, path);
         }
 
         // Called from CombatLogSystem.OnPlayerJoin.
@@ -43,51 +50,59 @@ namespace warwthtreason.Server.DeadHand
             // null after PlayerLeave fires and the network session closes.
             playerNames[player.PlayerUID] = player.PlayerName ?? "unknown";
 
-            // If the player was flagged for a combat-log punishment, kill
-            // them after a short delay to let the entity fully load into the world.
-            if (pendingDeaths.PlayerUids.Contains(player.PlayerUID))
-            {
-                pendingDeaths.PlayerUids.Remove(player.PlayerUID);
-                sapi.StoreModConfig(pendingDeaths, "WWR_PendingDeaths.json");
+            if (!pendingDeaths.PendingCombat.TryGetValue(player.PlayerUID, out int remainingSeconds))
+                return;
 
-                // 500ms = one tick. At PlayerJoin the entity isn't fully
-                // registered yet; Pos and health behavior may be missing.
-                sapi.Event.RegisterCallback(_ =>
+            pendingDeaths.PendingCombat.Remove(player.PlayerUID);
+            sapi.StoreModConfig(pendingDeaths, "WWR_PendingDeaths.json");
+
+            // Defer one tick — at PlayerJoin the entity isn't fully registered
+            // yet; Pos and health behavior may be missing.
+            sapi.Event.RegisterCallback(_ =>
+            {
+                if (player.Entity == null || !player.Entity.Alive) return;
+
+                switch (config.CombatLogoutPolicy)
                 {
-                    if (player.Entity != null && player.Entity.Alive)
-                    {
+                    case CombatLogoutPolicy.KeepTimer:
+                        restoreCombatTimer(player, remainingSeconds);
+                        break;
+
+                    case CombatLogoutPolicy.Kill:
                         Kill(player);
-                    }
-                }, 500);
-            }
+                        break;
+                }
+            }, 500);
         }
 
         // Called from CombatLogSystem.OnPlayerLeave.
-        // wasInCombat is computed by the caller because combatTimers lives
-        // in CombatLogSystem — no point duplicating that state here.
-        public void OnPlayerLeave(IServerPlayer player, bool wasInCombat)
+        // remainingSeconds is the combat time left at logout, in seconds.
+        public void OnPlayerLeave(IServerPlayer player, bool wasInCombat, int remainingSeconds)
         {
             if (player == null) return;
             if (!wasInCombat) return;
 
-            if (!config.KillOnCombatLogout)
+            // Nothing meaningful to restore if the timer already expired.
+            if (remainingSeconds <= 0) return;
+
+            if (pendingDeaths.PendingCombat.TryGetValue(player.PlayerUID, out int stored))
             {
-                sapi.Logger.Notification(
-                    $"[WarWithoutReason] Player '{player.PlayerName}' ({player.PlayerUID}) " +
-                    $"logged out during combat. Punishment skipped (KillOnCombatLogout = false).");
-                return;
+                // Should not happen under normal flow, but if it does,
+                // keep the longer remaining time.
+                if (remainingSeconds > stored)
+                    pendingDeaths.PendingCombat[player.PlayerUID] = remainingSeconds;
+            }
+            else
+            {
+                pendingDeaths.PendingCombat[player.PlayerUID] = remainingSeconds;
             }
 
-            // Mark the player for a kill on next login.
-            if (!pendingDeaths.PlayerUids.Contains(player.PlayerUID))
-            {
-                pendingDeaths.PlayerUids.Add(player.PlayerUID);
-                sapi.StoreModConfig(pendingDeaths, "WWR_PendingDeaths.json");
-            }
+            sapi.StoreModConfig(pendingDeaths, "WWR_PendingDeaths.json");
 
             sapi.Logger.Notification(
                 $"[WarWithoutReason] Player '{player.PlayerName}' ({player.PlayerUID}) " +
-                $"logged out during combat. Marked for kill on next login.");
+                $"logged out during combat with {remainingSeconds}s remaining. " +
+                $"Policy: {config.CombatLogoutPolicy}.");
         }
 
         // Kills the player with a Suicide DamageSource, so the game attributes
@@ -113,9 +128,8 @@ namespace warwthtreason.Server.DeadHand
 
             sapi.Logger.Notification(
                 $"[WarWithoutReason] Player '{playerName}' ({player.PlayerUID}) " +
-                $"logged out during combat and was killed on rejoin.");
+                $"killed on rejoin (CombatLogoutPolicy = Kill).");
 
-            // Broadcast to all online players in their own language.
             foreach (var onlinePlayer in sapi.World.AllOnlinePlayers)
             {
                 if (onlinePlayer is IServerPlayer sp)

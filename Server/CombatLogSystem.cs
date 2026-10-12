@@ -1,11 +1,18 @@
 ﻿using HarmonyLib;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
 using Vintagestory.API.Common;
+using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Server;
 using Vintagestory.GameContent;
+
 using warwthtreason.Common;
+using warwthtreason.Server.Compatibility;
 using warwthtreason.Server.DeadHand;
+using warwthtreason.Server.PlayerStats;
+
 
 namespace warwthtreason.Server
 {
@@ -25,6 +32,8 @@ namespace warwthtreason.Server
         private CombatLogConfig config = null!;
         private ClaimFlagsConfig claimFlagsConfig = null!;
         private DeadHandManager deadHand = null!;
+        private PlayerStatsManager playerStats = null!;
+        
 
         // === Combat state ===
         // Key: PlayerUID. Value: combat end time (ElapsedMilliseconds + duration).
@@ -41,6 +50,8 @@ namespace warwthtreason.Server
         // === Public accessors for patches and the client ===
         public CombatLogConfig Config => config;
         public ICoreServerAPI Sapi => sapi;
+        // True if the player is currently flagged as in combat.
+        public bool IsInCombat(IServerPlayer player) => combatTimers.ContainsKey(player.PlayerUID);
 
         public override void StartServerSide(ICoreServerAPI api)
         {
@@ -60,9 +71,16 @@ namespace warwthtreason.Server
         }
 
         // --- Step 1: Configs ---
+        public const string ConfigDir = "WarWithoutReason";
+
         private void InitializeConfigs()
         {
-            config = sapi.LoadModConfig<CombatLogConfig>("WarWithoutReason.json");
+            // Migrate legacy config files from ModConfig root into the new subfolder.
+            MigrateConfigIfNeeded(Constants.ConfigMain, $"{Constants.ConfigDir}/{Constants.ConfigMain}");
+            MigrateConfigIfNeeded(Constants.ConfigClaimFlags, $"{Constants.ConfigDir}/{Constants.ConfigClaimFlags}");
+            MigrateConfigIfNeeded(Constants.ConfigPending, $"{Constants.ConfigDir}/{Constants.ConfigPending}");
+
+            config = sapi.LoadModConfig<CombatLogConfig>($"{Constants.ConfigDir}/{Constants.ConfigMain}");
             if (config == null)
             {
                 config = new CombatLogConfig();
@@ -73,43 +91,58 @@ namespace warwthtreason.Server
                 config.CombatDurationSeconds = 30;
                 sapi.Logger.Warning("[WarWithoutReason] CombatDurationSeconds <= 0, reset to 30.");
             }
-            sapi.StoreModConfig(config, "WarWithoutReason.json");
+            sapi.StoreModConfig(config, $"{Constants.ConfigDir}/{Constants.ConfigMain}");
 
-            claimFlagsConfig = sapi.LoadModConfig<ClaimFlagsConfig>("WWR_ClaimFlags.json");
+            claimFlagsConfig = sapi.LoadModConfig<ClaimFlagsConfig>($"{Constants.ConfigDir}/{Constants.ConfigClaimFlags}");
             if (claimFlagsConfig == null)
             {
                 claimFlagsConfig = new ClaimFlagsConfig();
-                sapi.StoreModConfig(claimFlagsConfig, "WWR_ClaimFlags.json");
+                sapi.StoreModConfig(claimFlagsConfig, $"{Constants.ConfigDir}/{Constants.ConfigClaimFlags}");
             }
 
-            // DeadHand is self-contained: it reads config on construction and
-            // manages its own persistence in WWR_PendingDeaths.json.
-            deadHand = new DeadHandManager(sapi, config);
+            playerStats = new PlayerStatsManager(sapi);
+
+            deadHand = new DeadHandManager(sapi, config, RestoreCombatTimer);
+        }
+
+        // Moves a legacy config file from ModConfig root into the new subfolder.
+        // No-op if the old file doesn't exist or the new one already does.
+        private void MigrateConfigIfNeeded(string oldRelativePath, string newRelativePath)
+        {
+            string basePath = sapi.GetOrCreateDataPath("ModConfig");
+            string oldFull = Path.Combine(basePath, oldRelativePath);
+            string newFull = Path.Combine(basePath, newRelativePath);
+
+            if (!File.Exists(oldFull)) return;
+            if (File.Exists(newFull)) return;
+
+            Directory.CreateDirectory(Path.GetDirectoryName(newFull)!);
+            File.Move(oldFull, newFull);
+            sapi.Logger.Notification($"[WarWithoutReason] Migrated config: {oldRelativePath} → {newRelativePath}");
         }
 
         // --- Step 2: Optional mod detection ---
-        // When an overlapping claim-protection mod is present, the built-in
-        // protection is disabled. Combat timer, HUD, and logout punishment
-        // remain fully functional.
+        // Logs the presence of overlapping claim-protection mods, but does NOT
+        // alter the config. Both mods can coexist: they hook different methods
+        // (SafeZone/DPVPIC on Entity.ReceiveDamage, we on ShouldReceiveDamage),
+        // so they don't conflict. Whether WWR protection should stay enabled
+        // is the server admin's decision, not the mod's.
         private void CheckModCompatibility()
         {
             if (sapi.ModLoader.IsModEnabled("safezone"))
             {
-                sapi.Logger.Notification("[WarWithoutReason] SafeZone detected. Built-in claim protection disabled.");
-                config.EnableClaimProtection = false;
-                sapi.StoreModConfig(config, "WarWithoutReason.json");
-                return;
+                sapi.Logger.Notification("[WarWithoutReason] SafeZone detected. Both mods will run in parallel — SafeZone handles Entity.ReceiveDamage, WWR handles ShouldReceiveDamage.");
             }
 
             if (sapi.ModLoader.IsModEnabled("disablepvpinsideclaims"))
             {
-                sapi.Logger.Notification("[WarWithoutReason] DisablePvPInsideClaims detected. Built-in claim protection disabled.");
-                config.EnableClaimProtection = false;
-                sapi.StoreModConfig(config, "WarWithoutReason.json");
-                return;
+                sapi.Logger.Notification("[WarWithoutReason] DisablePvPInsideClaims detected. Both mods will run in parallel — DPVPIC handles Entity.ReceiveDamage, WWR handles ShouldReceiveDamage.");
             }
 
-            sapi.Logger.Notification("[WarWithoutReason] No conflicting claim-protection mod found. Built-in protection enabled.");
+            if (!sapi.ModLoader.IsModEnabled("safezone") && !sapi.ModLoader.IsModEnabled("disablepvpinsideclaims"))
+            {
+                sapi.Logger.Notification("[WarWithoutReason] No conflicting claim-protection mod found. Built-in protection enabled.");
+            }
         }
 
         // --- Step 3: Event subscriptions ---
@@ -117,29 +150,72 @@ namespace warwthtreason.Server
         {
             sapi.Event.PlayerJoin += OnPlayerJoin;
             sapi.Event.PlayerLeave += OnPlayerLeave;
+            sapi.Event.OnEntityDeath += OnEntityDeath;
             tickListenerId = sapi.Event.RegisterGameTickListener(OnGameTick, 1000);
         }
 
         // --- Step 4: Network channel ---
         private void InitializeNetwork()
         {
-            serverChannel = sapi.Network.RegisterChannel("warwthtreason")
+            serverChannel = sapi.Network.RegisterChannel(Constants.NetworkChannel)
                 .RegisterMessageType<CombatTimerPacket>();
         }
 
         // --- Step 5: Harmony patches ---
         private void InitializeHarmony()
         {
-            harmony = new Harmony(Mod.Info.ModID);
+            harmony = new Harmony(Constants.HarmonyId);
             CombatLogSystemAccessor.Instance = this;
 
-            // Delay PatchAll until all mods are loaded, so patches can resolve
-            // types from other mods (SafeZone, DisablePvPInsideClaims).
+            SafeZoneCombatOverridePatch.Sapi = sapi;
+            DisablePvPInsideClaimsCombatPatch.Sapi = sapi;
+
             sapi.Event.ServerRunPhase(EnumServerRunPhase.ModsAndConfigReady, () =>
             {
                 harmony.PatchAll();
                 sapi.Logger.Notification("[WarWithoutReason] Harmony patches applied.");
+
+#if DEBUG
+                DumpPatches("Entity.ReceiveDamage",
+                    AccessTools.Method(typeof(Entity), nameof(Entity.ReceiveDamage)));
+
+                DumpPatches("SafeZone.Patch_Entity_ReceiveDamage.Prefix",
+                    AccessTools.Method("SafeZone.Patch_Entity_ReceiveDamage:Prefix"));
+
+                DumpPatches("EntityBehaviorHealth.OnEntityReceiveDamage",
+                    AccessTools.Method(typeof(EntityBehaviorHealth), "OnEntityReceiveDamage"));
+
+                DumpPatches("EntityPlayer.ShouldReceiveDamage",
+                    AccessTools.Method(typeof(EntityPlayer), nameof(EntityPlayer.ShouldReceiveDamage)));
+#endif
             });
+                        
+#if DEBUG
+            // Local helper — dumps every Harmony patch on a method.
+            // Exists only in Debug builds; in Release it's compiled out entirely.
+            void DumpPatches(string label, MethodBase? method)
+            {
+                if (method == null)
+                {
+                    sapi.Logger.Notification($"[WWR DEBUG] {label}: method not found.");
+                    return;
+                }
+
+                var info = Harmony.GetPatchInfo(method);
+                if (info == null)
+                {
+                    sapi.Logger.Notification($"[WWR DEBUG] {label}: no patches.");
+                    return;
+                }
+
+                foreach (var p in info.Prefixes)
+                    sapi.Logger.Notification($"[WWR DEBUG] {label} — Prefix owner={p.owner}, method={p.PatchMethod.DeclaringType?.Name}.{p.PatchMethod.Name}");
+                foreach (var p in info.Postfixes)
+                    sapi.Logger.Notification($"[WWR DEBUG] {label} — Postfix owner={p.owner}, method={p.PatchMethod.DeclaringType?.Name}.{p.PatchMethod.Name}");
+                foreach (var p in info.Transpilers)
+                    sapi.Logger.Notification($"[WWR DEBUG] {label} — Transpiler owner={p.owner}, method={p.PatchMethod.DeclaringType?.Name}.{p.PatchMethod.Name}");
+            }
+#endif
         }
 
         // === Shutdown ===
@@ -150,10 +226,12 @@ namespace warwthtreason.Server
             {
                 sapi.Event.PlayerJoin -= OnPlayerJoin;
                 sapi.Event.PlayerLeave -= OnPlayerLeave;
+                sapi.Event.OnEntityDeath -= OnEntityDeath;
+                playerStats?.Flush();
                 sapi.Event.UnregisterGameTickListener(tickListenerId);
             }
 
-            harmony?.UnpatchAll(Mod.Info.ModID);
+            harmony?.UnpatchAll(Constants.HarmonyId);
             CombatLogSystemAccessor.Instance = null;
 
             sapi?.Logger.Notification("[WarWithoutReason] Server-side shutdown complete.");

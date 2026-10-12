@@ -1,22 +1,20 @@
-﻿using HarmonyLib;
-using System;
+﻿using System;
 using System.Reflection;
+using HarmonyLib;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
-using warwthtreason.Server.Compatibility;
+using Vintagestory.API.Server;
+using warwthtreason.Server.Diagnostics;
 
-namespace warwthtreason.Server
+namespace warwthtreason.Server.Compatibility
 {
     [HarmonyPatch]
     public static class SafeZoneCombatOverridePatch
     {
-        // Cached MethodBase resolved once in Prepare().
         private static MethodBase? targetMethod;
 
-        // Prepare runs before Harmony attempts to resolve the target.
-        // Returning false tells Harmony to skip this patch entirely.
-        // This is the correct way to conditionally apply a patch when the
-        // target mod may not be installed.
+        internal static ICoreServerAPI? Sapi;
+
         static bool Prepare()
         {
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
@@ -25,18 +23,35 @@ namespace warwthtreason.Server
                 if (patchType != null)
                 {
                     targetMethod = AccessTools.Method(patchType, "Prefix");
+                    Sapi?.Logger.Notification($"[WarWithoutReason] SafeZone override: found patch type, Prefix={(targetMethod != null)}");
                     return targetMethod != null;
                 }
             }
+
+            Sapi?.Logger.Notification("[WarWithoutReason] SafeZone override: patch type not found at PatchAll time.");
             return false;
         }
 
-        // TargetMethod only runs if Prepare() returned true.
         static MethodBase TargetMethod() => targetMethod!;
 
-        static bool Prefix(Entity __0, DamageSource __1)
+        static bool Prefix(Entity __0, DamageSource __1, ref bool __result)
         {
-            return !CombatInClaimStrategy.ShouldSkipOuterPatch(__0, __1);
+            var system = CombatLogSystemAccessor.Instance;
+            if (system == null) return true;
+
+            bool skip = CombatInClaimStrategy.ShouldSkipOuterPatch(__0, __1);
+
+            WWRDebug.Log(system.Sapi, $"SafeZone prefix → returning {!skip} (skip={skip}).");
+
+            if (skip)
+            {
+                // Skip SafeZone's Prefix body, but tell Harmony that it
+                // "returned true" so Entity.ReceiveDamage still runs.
+                __result = true;
+                return false;
+            }
+
+            return true;
         }
     }
 }

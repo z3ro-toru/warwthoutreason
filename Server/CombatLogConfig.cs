@@ -1,8 +1,28 @@
 // Config file. Look in ModConfig/WarWithoutReason.json.
 
+using Newtonsoft.Json.Converters;
+using Newtonsoft.Json;
+
 namespace warwthtreason.Server
 {
-    
+
+    // Determines what happens to a player who logs out while in combat.
+    // KeepTimer is the default — it restores the remaining combat timer
+    // on the player's next login. Kill is the legacy behavior.
+    [JsonConverter(typeof(StringEnumConverter))]
+    public enum CombatLogoutPolicy
+    {
+        // Restore the remaining combat timer on next login. No kill.
+        // Handles crashes and connection drops gracefully — no double
+        // punishment if the character was killed during despawn.
+        KeepTimer,
+
+        // Kill the player on next login. May result in double punishment
+        // if the character was already killed in the world while the
+        // player was offline.
+        Kill
+    }
+
     public class CombatLogConfig
     {
         // Duration of the combat mode in seconds. Default is 30 seconds.
@@ -14,8 +34,11 @@ namespace warwthtreason.Server
         // Whether to show large notifications on the screen.
         public bool ShowScreenMessages { get; set; } = true;
 
-        // Whether to kill the player who logs out during combat.
-        public bool KillOnCombatLogout { get; set; } = true;
+        // Что делать, если игрок вышел из игры во время боя.
+        // KeepTimer (default) — восстановить таймер при следующем входе.
+        // Kill — kill the player next login
+        public CombatLogoutPolicy CombatLogoutPolicy { get; set; } = CombatLogoutPolicy.KeepTimer;
+
 
         // Enables in-built claim protection system. Automatically disabled when a SafeZone is detected.
         public bool EnableClaimProtection { get; set; } = true;

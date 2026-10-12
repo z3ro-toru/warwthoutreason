@@ -6,6 +6,7 @@ using Vintagestory.API.Config;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
 using Vintagestory.GameContent;
+
 using warwthtreason.Common;
 
 namespace warwthtreason.Server
@@ -14,6 +15,9 @@ namespace warwthtreason.Server
     // combat timer bookkeeping, and per-second tick processing.
     public partial class CombatLogSystem
     {
+
+        
+
         // === Player events ===
 
         private void OnPlayerJoin(IServerPlayer player)
@@ -22,6 +26,7 @@ namespace warwthtreason.Server
 
             // DeadHand handles the combat-log punishment queue and name caching.
             deadHand.OnPlayerJoin(player);
+            playerStats.OnPlayerJoin(player);
 
             var entity = player.Entity;
             if (entity == null) return;
@@ -51,12 +56,17 @@ namespace warwthtreason.Server
             }
             damageHandlers.Remove(player.PlayerUID);
 
-            // Dictionary.Remove returns true if the key existed, which tells
-            // us whether the player was in combat at the moment of logout.
-            bool wasInCombat = combatTimers.Remove(player.PlayerUID);
+            // Extract the remaining time BEFORE removing the entry from the dictionary.
+            int remainingSeconds = 0;
+            bool wasInCombat = combatTimers.TryGetValue(player.PlayerUID, out long endTime);
+            if (wasInCombat)
+            {
+                remainingSeconds = (int)Math.Ceiling((endTime - sapi.World.ElapsedMilliseconds) / 1000.0);
+                combatTimers.Remove(player.PlayerUID);
+            }
 
-            // DeadHand decides whether to schedule a punishment.
-            deadHand.OnPlayerLeave(player, wasInCombat);
+            // DeadHand decides what to do based on the current policy.
+            deadHand.OnPlayerLeave(player, wasInCombat, remainingSeconds);
         }
 
         // === Combat log ===
@@ -69,9 +79,21 @@ namespace warwthtreason.Server
             if (attackerEntity?.Player is not IServerPlayer attacker) return damage;
             if (attacker == victim) return damage;
 
+            // Snapshot pre-hit state, so the stats manager can tell initiations
+            // apart from continuations. SetCombatMode flips these below.
+            bool attackerWasInCombat = combatTimers.ContainsKey(attacker.PlayerUID);
+            bool victimWasInCombat = combatTimers.ContainsKey(victim.PlayerUID);
+
+            playerStats.OnPlayerDamaged(attacker, victim, attackerWasInCombat, victimWasInCombat);
+
             SetCombatMode(victim);
             SetCombatMode(attacker);
             return damage;
+        }
+
+        private void OnEntityDeath(Entity entity, DamageSource damageSource)
+        {
+            playerStats.OnEntityDeath(entity, damageSource);
         }
 
         // Marks the player as in-combat and refreshes the end time.
@@ -108,7 +130,7 @@ namespace warwthtreason.Server
                     ? ColorUtil.ColorFromRgba(255, 0, 0, 255)
                     : ColorUtil.ColorFromRgba(0, 255, 0, 255);
 
-                player.SendIngameError("combat_status", screenMessage, color);
+                player.SendIngameError(Constants.ScreenMessageKey, screenMessage, color);
             }
         }
 
@@ -160,6 +182,27 @@ namespace warwthtreason.Server
         // === Public helpers for patches ===
 
         // True if the player is currently flagged as in combat.
-        public bool IsInCombat(IServerPlayer player) => combatTimers.ContainsKey(player.PlayerUID);
+        public void RestoreCombatTimer(IServerPlayer player, int seconds)
+        {
+            if (player == null || seconds <= 0) return;
+
+            long endTime = sapi.World.ElapsedMilliseconds + (seconds * 1000L);
+            combatTimers[player.PlayerUID] = endTime;
+
+            // Notify with a dedicated key that explains the timer was kept.
+            if (config.SendChatMessages)
+            {
+                string message = Lang.GetL(player.LanguageCode, "warwthtreason:combat-kept-timer", seconds);
+                player.SendMessage(GlobalConstants.GeneralChatGroup, message, EnumChatType.Notification);
+            }
+
+            // Red screen banner — reuse the standard enter message.
+            if (config.ShowScreenMessages)
+            {
+                string screenMessage = Lang.GetL(player.LanguageCode, "warwthtreason:combat-screen-enter");
+                int color = ColorUtil.ColorFromRgba(255, 0, 0, 255);
+                player.SendIngameError("combat_status", screenMessage, color);
+            }
+        }
     }
 }

@@ -1,6 +1,8 @@
 ﻿using Vintagestory.API.Client;
 using Vintagestory.API.Common;
+
 using warwthtreason.Common;
+
 
 namespace warwthtreason.Client
 {
@@ -13,7 +15,8 @@ namespace warwthtreason.Client
         {
             capi = api;
 
-                api.Network.RegisterChannel("warwthtreason")
+            // The channel name MUST match the server, character-for-character.
+            api.Network.RegisterChannel(Constants.NetworkChannel)
                 .RegisterMessageType<CombatTimerPacket>()
                 .SetMessageHandler<CombatTimerPacket>(OnTimerPacket);
 

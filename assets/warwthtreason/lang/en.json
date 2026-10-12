@@ -4,6 +4,7 @@
   "combat-screen-enter": "COMBAT MODE ACTIVATED",
   "combat-screen-exit": "COMBAT MODE ENDED",
   "combat-timer": "In combat: {0} s.",
+  "combat-kept-timer": "[Combat] Your combat timer was preserved while you were offline. {0}s remaining.",
   "combat-log-kill": "Player {0} logged out during combat and was killed by Karma.",
 
   "cmd-claimflag-desc": "Manage PvP/PvE flags for your claim.",
